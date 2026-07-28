@@ -31,9 +31,23 @@ jobs:
             -p:EnableCompressionInSingleFile=true `
             -o publish
 
-      - name: Upload exe artifact
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          # 确认 packages 目录存在
+          if (Test-Path publish/packages) {
+            Write-Host "packages/ 目录存在，内容："
+            Get-ChildItem publish/packages -Recurse | ForEach-Object { Write-Host "  $($_.FullName.Replace('publish/',''))" }
+          } else {
+            Write-Host "⚠️ packages/ 目录不存在！"
+          }
+          # 把 exe 和 packages 一起打成 zip
+          Compress-Archive -Path publish/OfflineCompanion.exe, publish/packages -DestinationPath OfflineCompanion-release.zip -Force
+          Write-Host "zip 打包完成"
+
+      - name: Upload release zip
         uses: actions/upload-artifact@v4
         with:
           name: OfflineCompanion-win-x64
-          path: publish/*.exe
+          path: OfflineCompanion-release.zip
           retention-days: 30
