@@ -1,53 +1,64 @@
+using System.Reflection;
 using Companion.Infrastructure.Paths;
 
 namespace Companion.App;
 
 public sealed class BundledPackageSeeder(AppDataPaths paths)
 {
+    private const string ResourcePrefix = "OfflineCompanion.packages.";
+
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
-        var source = Path.Combine(AppContext.BaseDirectory, "packages");
-        if (!Directory.Exists(source))
+        var assembly = Assembly.GetExecutingAssembly();
+        var resourceNames = assembly.GetManifestResourceNames();
+        var packageResources = resourceNames
+            .Where(n => n.StartsWith(ResourcePrefix, StringComparison.Ordinal))
+            .ToList();
+
+        if (packageResources.Count == 0)
         {
             return;
         }
 
-        await CopyTreeAsync(
-            Path.Combine(source, "characters"),
+        await CopyEmbeddedResourcesAsync(
+            packageResources.Where(n => n.Contains(".characters.", StringComparison.OrdinalIgnoreCase)),
             paths.Characters,
             cancellationToken);
-        await CopyTreeAsync(
-            Path.Combine(source, "actions"),
+        await CopyEmbeddedResourcesAsync(
+            packageResources.Where(n => n.Contains(".actions.", StringComparison.OrdinalIgnoreCase)),
             paths.Actions,
             cancellationToken);
     }
 
-    private static async Task CopyTreeAsync(
-        string source,
+    private async Task CopyEmbeddedResourcesAsync(
+        IEnumerable<string> resources,
         string destination,
         CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(source))
-        {
-            return;
-        }
-
-        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
-        {
-            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
-        }
-
-        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        var assembly = Assembly.GetExecutingAssembly();
+        foreach (var resourceName in resources)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var target = Path.Combine(destination, Path.GetRelativePath(source, file));
+
+            // ResourcePrefix + "characters\shadow-crow-ninja\animations\idle.json"
+            var relativePath = resourceName[ResourcePrefix.Length..];
+
+            // Normalise: the LogicalName uses Windows-style backslashes from %(RecursiveDir)
+            // which end up embedded literally. Replace with OS-appropriate separator.
+            relativePath = relativePath.Replace('\\', Path.DirectorySeparatorChar);
+
+            var target = Path.Combine(destination, relativePath);
             if (File.Exists(target))
             {
                 continue;
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            await using var input = File.OpenRead(file);
+            await using var input = assembly.GetManifestResourceStream(resourceName);
+            if (input is null)
+            {
+                continue;
+            }
             await using var output = File.Create(target);
             await input.CopyToAsync(output, cancellationToken);
         }

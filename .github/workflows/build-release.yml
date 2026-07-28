@@ -3,7 +3,7 @@ name: Build Windows Release
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore OfflineCompanion.sln
 
-      - name: Build Release (self-contained single-file)
+      - name: Build Release (self-contained single-file, resources embedded)
         run: |
           dotnet publish src/Companion.App/Companion.App.csproj `
             -c Release `
@@ -31,23 +31,28 @@ jobs:
             -p:EnableCompressionInSingleFile=true `
             -o publish
 
-      - name: Package release zip
+      - name: Verify build output
         shell: pwsh
         run: |
-          # 确认 packages 目录存在
-          if (Test-Path publish/packages) {
-            Write-Host "packages/ 目录存在，内容："
-            Get-ChildItem publish/packages -Recurse | ForEach-Object { Write-Host "  $($_.FullName.Replace('publish/',''))" }
+          $exe = "publish/OfflineCompanion.exe"
+          if (Test-Path $exe) {
+            $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+            Write-Host "✅ OfflineCompanion.exe ($size MB)"
           } else {
-            Write-Host "⚠️ packages/ 目录不存在！"
+            Write-Host "❌ exe not found!"
+            exit 1
           }
-          # 把 exe 和 packages 一起打成 zip
-          Compress-Archive -Path publish/OfflineCompanion.exe, publish/packages -DestinationPath OfflineCompanion-release.zip -Force
-          Write-Host "zip 打包完成"
+          # Confirm no external packages needed
+          $pkgDir = "publish/packages"
+          if (Test-Path $pkgDir) {
+            Write-Host "⚠️ packages/ dir exists (should be embedded now)"
+          } else {
+            Write-Host "✅ No external packages/ — resources fully embedded in exe"
+          }
 
-      - name: Upload release zip
+      - name: Upload exe
         uses: actions/upload-artifact@v4
         with:
           name: OfflineCompanion-win-x64
-          path: OfflineCompanion-release.zip
+          path: publish/OfflineCompanion.exe
           retention-days: 30
