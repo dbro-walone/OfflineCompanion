@@ -31,6 +31,7 @@ public partial class PetWindow
     private bool _isDragging;
     private bool _suppressNextClick;
     private int _sharinganState;
+    private int _currentIdlePose;
 
     public PetWindow(
         IServiceProvider services,
@@ -153,11 +154,13 @@ public partial class PetWindow
 
         if (_sharinganState == 0)
         {
-            Sprite.Play(IdleFrames, 2);
+            // Show a single static frame — no animation loop, no flickering.
+            // _currentIdlePose tracks which "pose" we're holding (0=standing, 1=relaxed, etc.)
+            Sprite.ShowStaticFrame(_currentIdlePose);
         }
         else
         {
-            Sprite.Play([5 + _sharinganState], 2);
+            Sprite.ShowStaticFrame(5 + _sharinganState);
         }
     }
 
@@ -169,7 +172,18 @@ public partial class PetWindow
         }
     }
 
-    private void OnSpriteAnimationCompleted(object? sender, EventArgs e) => StartRestAnimation();
+    private void OnSpriteAnimationCompleted(object? sender, EventArgs e)
+    {
+        // After a one-shot animation finishes, return to static pose — no looping.
+        if (_sharinganState > 0)
+        {
+            Sprite.ShowStaticFrame(5 + _sharinganState);
+        }
+        else
+        {
+            Sprite.ShowStaticFrame(_currentIdlePose);
+        }
+    }
 
     private void ScheduleNextIdleAction()
     {
@@ -193,7 +207,11 @@ public partial class PetWindow
         if (_settings.IdleActionsEnabled && !_settings.ReduceMotion &&
             !_isDragging && _sharinganState == 0)
         {
-            PlayOnce([Random.Shared.Next(4, 8)], 4);
+            // Cycle through poses: 0 (standing) → 1 → 2 → 3 → 0 ...
+            // Each pose is held static for 15-30 seconds, then switches.
+            // Like the Rising antivirus lion — no animation loop, just pose changes.
+            _currentIdlePose = (_currentIdlePose + 1) % 4;
+            Sprite.ShowStaticFrame(_currentIdlePose);
         }
     }
 

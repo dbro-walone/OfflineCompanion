@@ -100,6 +100,18 @@ public sealed class SpriteAnimationView : Image
 
     public void Pause() => _timer.Stop();
 
+    /// <summary>
+    /// Display a single frame with no animation timer running.
+    /// </summary>
+    public void ShowStaticFrame(int frame)
+    {
+        _timer.Stop();
+        _playOnce = false;
+        _frames = [Math.Max(0, frame)];
+        _index = 0;
+        UpdateFrame();
+    }
+
     private void StartPlayback(IEnumerable<int> frames, int fps, bool playOnce)
     {
         _timer.Stop();
