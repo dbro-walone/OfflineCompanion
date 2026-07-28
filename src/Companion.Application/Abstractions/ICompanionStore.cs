@@ -8,6 +8,7 @@ public interface ICompanionStore
     Task<IReadOnlyList<TodoItem>> GetTodosAsync(bool includeCompleted, CancellationToken cancellationToken = default);
     Task UpsertTodoAsync(TodoItem item, CancellationToken cancellationToken = default);
     Task DeleteTodoAsync(Guid id, CancellationToken cancellationToken = default);
+    Task DeleteCompletedTodosAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Reminder>> GetActiveRemindersAsync(CancellationToken cancellationToken = default);
     Task UpsertReminderAsync(Reminder reminder, CancellationToken cancellationToken = default);
     Task<PomodoroSession?> GetCurrentPomodoroAsync(CancellationToken cancellationToken = default);

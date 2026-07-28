@@ -46,7 +46,7 @@
                                     CornerRadius="8" Padding="9,4"
                                     VerticalAlignment="Center">
                                 <TextBlock Text="{Binding Version}"
-                                           Foreground="{StaticResource AccentHoverBrush}"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
                                            FontSize="12" />
                             </Border>
                         </Grid>

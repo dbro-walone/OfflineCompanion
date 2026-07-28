@@ -1,7 +1,7 @@
 <Window x:Class="Companion.App.TimerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="番茄钟" Width="390" Height="310"
+        Title="番茄钟" Width="420" Height="350"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         AutomationProperties.Name="番茄钟窗口">
@@ -16,6 +16,11 @@
             <TextBlock Text="保持节奏，专注当下"
                        Style="{StaticResource SecondaryText}"
                        HorizontalAlignment="Center" Margin="0,3,0,0" />
+            <TextBlock x:Name="ActiveTodoText" Visibility="Collapsed"
+                       Foreground="{DynamicResource AccentHoverBrush}"
+                       HorizontalAlignment="Center" Margin="0,8,0,0"
+                       TextTrimming="CharacterEllipsis" MaxWidth="340"
+                       AutomationProperties.Name="当前专注待办" />
         </StackPanel>
         <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,18,0,0">
             <Grid>
@@ -25,7 +30,7 @@
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="TimeText" Text="25:00"
                            FontSize="58" FontWeight="Light"
-                           Foreground="{StaticResource AccentBrush}"
+                           Foreground="{DynamicResource AccentBrush}"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            AutomationProperties.Name="剩余时间" />
                 <StackPanel Grid.Row="1" Orientation="Horizontal"

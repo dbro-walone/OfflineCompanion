@@ -17,11 +17,19 @@ public sealed class TodoService(ICompanionStore store, IClock clock, IEventBus e
         TodoPriority priority = TodoPriority.Normal,
         DateTimeOffset? dueAt = null,
         DateTimeOffset? reminderAt = null,
+        int estimatedPomodoros = 1,
+        DateTimeOffset? dueTime = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
             throw new ArgumentException("待办标题不能为空。", nameof(title));
+        }
+        if (estimatedPomodoros is < 1 or > 10)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(estimatedPomodoros),
+                "预计番茄数必须在 1 到 10 之间。");
         }
 
         var now = clock.Now;
@@ -34,7 +42,10 @@ public sealed class TodoService(ICompanionStore store, IClock clock, IEventBus e
             reminderAt,
             null,
             now,
-            now);
+            now,
+            estimatedPomodoros,
+            0,
+            dueTime);
         await store.UpsertTodoAsync(item, cancellationToken);
         return item;
     }
@@ -56,4 +67,18 @@ public sealed class TodoService(ICompanionStore store, IClock clock, IEventBus e
 
     public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
         store.DeleteTodoAsync(id, cancellationToken);
+
+    public Task ClearCompletedAsync(CancellationToken cancellationToken = default) =>
+        store.DeleteCompletedTodosAsync(cancellationToken);
+
+    public async Task<TodoItem> CompletePomodoroAsync(
+        TodoItem item,
+        CancellationToken cancellationToken = default)
+    {
+        var latest = (await store.GetTodosAsync(true, cancellationToken))
+            .FirstOrDefault(candidate => candidate.Id == item.Id) ?? item;
+        var updated = latest.CompletePomodoro(clock.Now);
+        await store.UpsertTodoAsync(updated, cancellationToken);
+        return updated;
+    }
 }

@@ -38,7 +38,10 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
                 reminder_at TEXT NULL,
                 completed_at TEXT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                estimated_pomodoros INTEGER NOT NULL DEFAULT 1,
+                completed_pomodoros INTEGER NOT NULL DEFAULT 0,
+                due_time TEXT NULL
             );
             CREATE INDEX IF NOT EXISTS ix_todo_due ON todo_items(due_at);
 
@@ -69,6 +72,25 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
                 status INTEGER NOT NULL
             );
             """, cancellationToken);
+
+        await EnsureColumnAsync(
+            connection,
+            "todo_items",
+            "estimated_pomodoros",
+            "INTEGER NOT NULL DEFAULT 1",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "todo_items",
+            "completed_pomodoros",
+            "INTEGER NOT NULL DEFAULT 0",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "todo_items",
+            "due_time",
+            "TEXT NULL",
+            cancellationToken);
     }
 
     public async Task<IReadOnlyList<TodoItem>> GetTodosAsync(
@@ -79,7 +101,8 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, title, note, priority, due_at, reminder_at, completed_at, created_at, updated_at
+            SELECT id, title, note, priority, due_at, reminder_at, completed_at, created_at, updated_at,
+                   estimated_pomodoros, completed_pomodoros, due_time
             FROM todo_items
             WHERE $includeCompleted = 1 OR completed_at IS NULL
             ORDER BY completed_at IS NOT NULL, due_at IS NULL, due_at, priority DESC, created_at DESC;
@@ -98,7 +121,10 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
                 ParseNullableDate(reader, 5),
                 ParseNullableDate(reader, 6),
                 DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
-                DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture)));
+                DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
+                reader.GetInt32(9),
+                reader.GetInt32(10),
+                ParseNullableDate(reader, 11)));
         }
 
         return result;
@@ -111,9 +137,11 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO todo_items
-                (id, title, note, priority, due_at, reminder_at, completed_at, created_at, updated_at)
+                (id, title, note, priority, due_at, reminder_at, completed_at, created_at, updated_at,
+                 estimated_pomodoros, completed_pomodoros, due_time)
             VALUES
-                ($id, $title, $note, $priority, $dueAt, $reminderAt, $completedAt, $createdAt, $updatedAt)
+                ($id, $title, $note, $priority, $dueAt, $reminderAt, $completedAt, $createdAt, $updatedAt,
+                 $estimatedPomodoros, $completedPomodoros, $dueTime)
             ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title,
                 note=excluded.note,
@@ -121,6 +149,9 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
                 due_at=excluded.due_at,
                 reminder_at=excluded.reminder_at,
                 completed_at=excluded.completed_at,
+                estimated_pomodoros=excluded.estimated_pomodoros,
+                completed_pomodoros=excluded.completed_pomodoros,
+                due_time=excluded.due_time,
                 updated_at=excluded.updated_at;
             """;
         command.Parameters.AddWithValue("$id", item.Id.ToString());
@@ -132,6 +163,9 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
         command.Parameters.AddWithValue("$completedAt", Db(item.CompletedAt));
         command.Parameters.AddWithValue("$createdAt", item.CreatedAt.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", item.UpdatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$estimatedPomodoros", item.EstimatedPomodoros);
+        command.Parameters.AddWithValue("$completedPomodoros", item.CompletedPomodoros);
+        command.Parameters.AddWithValue("$dueTime", Db(item.DueTime));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -142,6 +176,15 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
         await using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM todo_items WHERE id=$id;";
         command.Parameters.AddWithValue("$id", id.ToString());
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task DeleteCompletedTodosAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM todo_items WHERE completed_at IS NOT NULL;";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -288,6 +331,31 @@ public sealed class SqliteCompanionStore(string connectionString) : ICompanionSt
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        string definition,
+        CancellationToken cancellationToken)
+    {
+        await using var inspect = connection.CreateCommand();
+        inspect.CommandText = $"PRAGMA table_info({table});";
+        await using var reader = await inspect.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        await reader.DisposeAsync();
+        await ExecuteAsync(
+            connection,
+            $"ALTER TABLE {table} ADD COLUMN {column} {definition};",
+            cancellationToken);
     }
 
     private static object Db(string? value) => value is null ? DBNull.Value : value;

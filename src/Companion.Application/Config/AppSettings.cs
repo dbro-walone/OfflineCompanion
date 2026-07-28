@@ -13,6 +13,7 @@ public sealed record AppSettings
     public bool PauseAnimations { get; init; }
     public bool ReduceMotion { get; init; }
     public bool SilentWhenFullscreen { get; init; } = true;
+    public string Theme { get; init; } = "dark";
     public int PomodoroFocusMinutes { get; init; } = 25;
     public int PomodoroShortBreakMinutes { get; init; } = 5;
     public int PomodoroLongBreakMinutes { get; init; } = 15;

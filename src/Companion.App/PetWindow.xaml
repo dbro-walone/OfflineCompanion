@@ -36,15 +36,15 @@
                                        ToolTip="左键互动或拖动，双击切换写轮眼，右键打开菜单" />
         <Border x:Name="Fallback"
                 Visibility="Collapsed"
-                Background="#F2252830"
-                BorderBrush="#FF393D48"
+                Background="{DynamicResource PanelBackground}"
+                BorderBrush="{DynamicResource StrokeBrush}"
                 BorderThickness="1"
                 CornerRadius="20"
                 Padding="18">
             <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="鸦影" Foreground="White" FontSize="26"
+                <TextBlock Text="鸦影" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="26"
                            FontWeight="SemiBold" HorizontalAlignment="Center" />
-                <TextBlock Text="角色资源暂不可用" Foreground="#FF8B8D98"
+                <TextBlock Text="角色资源暂不可用" Foreground="{DynamicResource TextSecondaryBrush}"
                            Margin="0,8,0,0" TextAlignment="Center" />
             </StackPanel>
         </Border>

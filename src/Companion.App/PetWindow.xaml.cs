@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Companion.Application.Events;
 using Companion.Infrastructure.Config;
@@ -32,6 +33,7 @@ public partial class PetWindow
     private bool _suppressNextClick;
     private int _sharinganState;
     private int _currentIdlePose;
+    private int _crossfadeVersion;
 
     public PetWindow(
         IServiceProvider services,
@@ -154,20 +156,56 @@ public partial class PetWindow
 
         if (_sharinganState == 0)
         {
-            // Show a single static frame — no animation loop, no flickering.
-            // _currentIdlePose tracks which "pose" we're holding (0=standing, 1=relaxed, etc.)
-            Sprite.ShowStaticFrame(_currentIdlePose);
+            CrossfadeToFrame(_currentIdlePose);
         }
         else
         {
-            Sprite.ShowStaticFrame(5 + _sharinganState);
+            CrossfadeToFrame(5 + _sharinganState);
         }
+    }
+
+    private void CrossfadeToFrame(int frame)
+    {
+        if (Sprite.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var version = ++_crossfadeVersion;
+        var fadeOut = new DoubleAnimation
+        {
+            To = 0,
+            Duration = TimeSpan.FromMilliseconds(200),
+            FillBehavior = FillBehavior.HoldEnd
+        };
+        fadeOut.Completed += (_, _) =>
+        {
+            if (version != _crossfadeVersion)
+            {
+                return;
+            }
+
+            Sprite.ShowStaticFrame(frame);
+            Sprite.Opacity = 1;
+            var fadeIn = new DoubleAnimation
+            {
+                From = 0,
+                To = 1,
+                Duration = TimeSpan.FromMilliseconds(200),
+                FillBehavior = FillBehavior.Stop
+            };
+            Sprite.BeginAnimation(OpacityProperty, fadeIn, HandoffBehavior.SnapshotAndReplace);
+        };
+        Sprite.BeginAnimation(OpacityProperty, fadeOut, HandoffBehavior.SnapshotAndReplace);
     }
 
     private void PlayOnce(IEnumerable<int> frames, int fps)
     {
         if (!_isDragging && Sprite.Visibility == Visibility.Visible)
         {
+            _crossfadeVersion++;
+            Sprite.BeginAnimation(OpacityProperty, null);
+            Sprite.Opacity = 1;
             Sprite.PlayOnce(frames, fps);
         }
     }
@@ -211,7 +249,7 @@ public partial class PetWindow
             // Each pose is held static for 15-30 seconds, then switches.
             // Like the Rising antivirus lion — no animation loop, just pose changes.
             _currentIdlePose = (_currentIdlePose + 1) % 4;
-            Sprite.ShowStaticFrame(_currentIdlePose);
+            CrossfadeToFrame(_currentIdlePose);
         }
     }
 

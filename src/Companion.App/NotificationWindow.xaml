@@ -6,10 +6,10 @@
         Background="Transparent" ShowInTaskbar="False"
         Topmost="True"
         AutomationProperties.Name="提醒气泡">
-    <Border Background="{StaticResource PanelBackground}" CornerRadius="12"
-            Padding="18" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1">
+    <Border Background="{DynamicResource PanelBackground}" CornerRadius="12"
+            Padding="18" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1">
         <StackPanel>
-            <TextBlock Text="提醒" Foreground="{StaticResource AccentHoverBrush}"
+            <TextBlock Text="提醒" Foreground="{DynamicResource AccentHoverBrush}"
                        FontWeight="SemiBold" />
             <TextBlock x:Name="MessageText" FontSize="15"
                        Margin="0,8,0,12" TextWrapping="Wrap" />

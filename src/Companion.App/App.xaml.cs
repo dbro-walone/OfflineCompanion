@@ -37,6 +37,7 @@ public partial class App
 
             var configStore = new JsonConfigStore(paths.Settings);
             var settings = await configStore.LoadAsync();
+            ThemeManager.Apply(settings.Theme);
             var connectionString = new SqliteConnectionStringBuilder
             {
                 DataSource = paths.Database,

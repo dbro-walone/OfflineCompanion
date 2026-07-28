@@ -16,9 +16,17 @@ public sealed record TodoItem(
     DateTimeOffset? ReminderAt,
     DateTimeOffset? CompletedAt,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt)
+    DateTimeOffset UpdatedAt,
+    int EstimatedPomodoros = 1,
+    int CompletedPomodoros = 0,
+    DateTimeOffset? DueTime = null)
 {
     public bool IsCompleted => CompletedAt is not null;
+    public bool CanFocus => !IsCompleted;
+    public DateTimeOffset? EffectiveDueAt => DueTime ?? DueAt;
+    public bool IsOverdue => !IsCompleted &&
+                             EffectiveDueAt is { } due &&
+                             due < DateTimeOffset.Now;
 
     public TodoItem Complete(DateTimeOffset now) => this with
     {
@@ -29,6 +37,12 @@ public sealed record TodoItem(
     public TodoItem Restore(DateTimeOffset now) => this with
     {
         CompletedAt = null,
+        UpdatedAt = now
+    };
+
+    public TodoItem CompletePomodoro(DateTimeOffset now) => this with
+    {
+        CompletedPomodoros = CompletedPomodoros + 1,
         UpdatedAt = now
     };
 }
