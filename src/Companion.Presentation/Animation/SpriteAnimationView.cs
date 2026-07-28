@@ -13,6 +13,8 @@ public sealed class SpriteAnimationView : Image
     private BitmapSource? _atlas;
     private int[] _frames = [0];
     private int _index;
+    private bool _playOnce;
+    private bool _updatingPlaybackProperties;
 
     public SpriteAnimationView()
     {
@@ -23,6 +25,8 @@ public sealed class SpriteAnimationView : Image
         Loaded += (_, _) => Restart();
         Unloaded += (_, _) => _timer.Stop();
     }
+
+    public event EventHandler? Completed;
 
     public static readonly DependencyProperty AtlasPathProperty = DependencyProperty.Register(
         nameof(AtlasPath),
@@ -86,19 +90,47 @@ public sealed class SpriteAnimationView : Image
 
     public void Play(IEnumerable<int> frames, int fps)
     {
-        _frames = frames.DefaultIfEmpty(0).ToArray();
-        Fps = Math.Clamp(fps, 1, 60);
-        _index = 0;
-        UpdateFrame();
-        _timer.Start();
+        StartPlayback(frames, fps, playOnce: false);
     }
 
-    private static void OnAnimationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
-        ((SpriteAnimationView)d).Restart();
+    public void PlayOnce(IEnumerable<int> frames, int fps)
+    {
+        StartPlayback(frames, fps, playOnce: true);
+    }
+
+    public void Pause() => _timer.Stop();
+
+    private void StartPlayback(IEnumerable<int> frames, int fps, bool playOnce)
+    {
+        _timer.Stop();
+        _frames = frames.DefaultIfEmpty(0).ToArray();
+        var clampedFps = Math.Clamp(fps, 1, 60);
+        _updatingPlaybackProperties = true;
+        SetCurrentValue(FpsProperty, clampedFps);
+        _updatingPlaybackProperties = false;
+        _timer.Interval = TimeSpan.FromSeconds(1d / clampedFps);
+        _index = 0;
+        _playOnce = playOnce;
+        UpdateFrame();
+        if (IsLoaded)
+        {
+            _timer.Start();
+        }
+    }
+
+    private static void OnAnimationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var view = (SpriteAnimationView)d;
+        if (!view._updatingPlaybackProperties)
+        {
+            view.Restart();
+        }
+    }
 
     private void Restart()
     {
         _timer.Stop();
+        _playOnce = false;
         _frames = Frames
             .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Select(x => int.TryParse(x, out var value) ? value : 0)
@@ -108,6 +140,7 @@ public sealed class SpriteAnimationView : Image
             _frames = [0];
         }
 
+        _atlas = null;
         if (!string.IsNullOrWhiteSpace(AtlasPath) && File.Exists(AtlasPath))
         {
             var bitmap = new BitmapImage();
@@ -130,7 +163,17 @@ public sealed class SpriteAnimationView : Image
 
     private void Advance()
     {
-        _index = (_index + 1) % _frames.Length;
+        if (_playOnce && _index == _frames.Length - 1)
+        {
+            _timer.Stop();
+            _playOnce = false;
+            Completed?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        _index = _playOnce
+            ? _index + 1
+            : (_index + 1) % _frames.Length;
         UpdateFrame();
     }
 

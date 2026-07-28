@@ -1,26 +1,42 @@
 <Window x:Class="Companion.App.TimerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="番茄钟" Width="360" Height="260"
+        Title="番茄钟" Width="390" Height="310"
         WindowStartupLocation="CenterOwner"
-        Background="#FFF5F6FA"
+        ResizeMode="NoResize"
         AutomationProperties.Name="番茄钟窗口">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <TextBlock Text="专注计时" FontSize="24" FontWeight="SemiBold"
-                   HorizontalAlignment="Center" />
-        <TextBlock x:Name="TimeText" Grid.Row="1" Text="25:00"
-                   FontSize="56" FontWeight="Light"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   AutomationProperties.Name="剩余时间" />
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center">
-            <Button Content="开始" Click="StartTimer" AutomationProperties.Name="开始番茄钟" />
-            <Button Content="暂停/继续" Click="TogglePause"
-                    AutomationProperties.Name="暂停或继续番茄钟" />
+        <StackPanel>
+            <TextBlock Text="专注计时" FontSize="26" FontWeight="SemiBold"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="保持节奏，专注当下"
+                       Style="{StaticResource SecondaryText}"
+                       HorizontalAlignment="Center" Margin="0,3,0,0" />
         </StackPanel>
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,18,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="TimeText" Text="25:00"
+                           FontSize="58" FontWeight="Light"
+                           Foreground="{StaticResource AccentBrush}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           AutomationProperties.Name="剩余时间" />
+                <StackPanel Grid.Row="1" Orientation="Horizontal"
+                            HorizontalAlignment="Center" Margin="0,10,0,-4">
+                    <Button Content="开始" Click="StartTimer"
+                            Style="{StaticResource AccentButton}"
+                            AutomationProperties.Name="开始番茄钟" />
+                    <Button Content="暂停/继续" Click="TogglePause"
+                            AutomationProperties.Name="暂停或继续番茄钟" />
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

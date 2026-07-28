@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using Companion.Application.Events;
 using Companion.Infrastructure.Config;
 using Companion.Infrastructure.Paths;
@@ -13,12 +15,21 @@ namespace Companion.App;
 
 public partial class PetWindow
 {
+    private static readonly int[] IdleFrames = [0, 1, 2, 3];
+    private static readonly int[] ReactionFrames = [4, 5];
+
     private readonly IServiceProvider _services;
     private readonly JsonConfigStore _configStore;
     private readonly IEventBus _eventBus;
+    private readonly DispatcherTimer _idleActionTimer;
     private AppSettings _settings;
     private Point _mouseDown;
+    private Storyboard? _hoverStoryboard;
     private bool _allowClose;
+    private bool _dragOccurred;
+    private bool _isDragging;
+    private bool _suppressNextClick;
+    private int _sharinganState;
 
     public PetWindow(
         IServiceProvider services,
@@ -33,6 +44,9 @@ public partial class PetWindow
         _configStore = configStore;
         _settings = settings;
         _eventBus = eventBus;
+        _idleActionTimer = new DispatcherTimer(DispatcherPriority.Background);
+        _idleActionTimer.Tick += OnIdleActionTimerTick;
+
         Topmost = settings.Topmost;
         Width *= settings.PetScale;
         Height *= settings.PetScale;
@@ -43,8 +57,14 @@ public partial class PetWindow
         }
 
         LoadCharacter(paths, settings.CurrentCharacterId, validator);
+        Sprite.Completed += OnSpriteAnimationCompleted;
         _eventBus.Subscribe<ActionRequested>(OnActionRequested);
         SourceInitialized += (_, _) => MonitorPlacement.ClampAndDetectEdge(this);
+        Loaded += (_, _) =>
+        {
+            StartRestAnimation();
+            ScheduleNextIdleAction();
+        };
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
     }
 
@@ -89,11 +109,9 @@ public partial class PetWindow
             Sprite.AtlasPath = atlasPath;
             Sprite.FrameWidth = manifest.Frame.Width;
             Sprite.FrameHeight = manifest.Frame.Height;
-            Sprite.Frames = ExpandFrames(idle);
-            Sprite.Fps = idle.Fps;
+            Sprite.Frames = string.Join(",", IdleFrames);
+            Sprite.Fps = 2;
 
-            // Give the sprite a moment to load the atlas; if it fails, show fallback
-            // (BitmapImage loads synchronously with CacheOption.OnLoad)
             if (!File.Exists(atlasPath))
             {
                 ShowFallback();
@@ -124,53 +142,181 @@ public partial class PetWindow
                throw new InvalidDataException($"动画定义无效：{relativePath}");
     }
 
-    private static string ExpandFrames(AnimationDefinition animation)
+    private void StartRestAnimation()
     {
-        var segments = new[] { animation.Segments.Entry, animation.Segments.Loop, animation.Segments.Exit }
-            .Where(x => x is not null)
-            .Cast<AnimationSegment>();
-        return string.Join(",", segments.SelectMany(segment =>
-            Enumerable.Range(segment.Start, segment.End - segment.Start + 1)
-                .SelectMany(frame => Enumerable.Repeat(frame, Math.Max(1, segment.Repeat)))));
+        if (_isDragging || Sprite.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        if (_sharinganState == 0)
+        {
+            Sprite.Play(IdleFrames, 2);
+        }
+        else
+        {
+            Sprite.Play([5 + _sharinganState], 2);
+        }
+    }
+
+    private void PlayOnce(IEnumerable<int> frames, int fps)
+    {
+        if (!_isDragging && Sprite.Visibility == Visibility.Visible)
+        {
+            Sprite.PlayOnce(frames, fps);
+        }
+    }
+
+    private void OnSpriteAnimationCompleted(object? sender, EventArgs e) => StartRestAnimation();
+
+    private void ScheduleNextIdleAction()
+    {
+        _idleActionTimer.Stop();
+        _idleActionTimer.Interval = TimeSpan.FromSeconds(Random.Shared.Next(15, 31));
+        _idleActionTimer.Start();
+    }
+
+    private void OnIdleActionTimerTick(object? sender, EventArgs e)
+    {
+        ScheduleNextIdleAction();
+        if (_settings.IdleActionsEnabled && !_settings.ReduceMotion &&
+            !_isDragging && _sharinganState == 0)
+        {
+            PlayOnce([Random.Shared.Next(4, 8)], 4);
+        }
     }
 
     private void OnActionRequested(ActionRequested message)
     {
         Dispatcher.Invoke(() =>
         {
-            var frames = message.ActionId switch
+            int[] frames = message.ActionId switch
             {
-                "clicked" => new[] { 4, 5 },
-                "celebrate" => new[] { 7, 7, 3 },
-                var action when action.StartsWith("reminder.", StringComparison.Ordinal) => new[] { 6, 6, 3 },
-                "focus" => new[] { 1, 2 },
-                "relax" => new[] { 1, 3 },
-                _ => new[] { 0, 1, 2, 3 }
+                "clicked" => ReactionFrames,
+                "celebrate" => [7, 7, 3],
+                var action when action.StartsWith("reminder.", StringComparison.Ordinal) => [6, 6, 3],
+                "focus" => [1, 2],
+                "relax" => [1, 3],
+                _ => IdleFrames
             };
-            Sprite.Play(frames, 6);
+            PlayOnce(frames, message.ActionId == "clicked" ? 8 : 6);
         });
+    }
+
+    private void OnMouseEnter(object sender, MouseEventArgs e)
+    {
+        if (_isDragging || _settings.ReduceMotion)
+        {
+            return;
+        }
+
+        var direction = e.GetPosition(this).X < ActualWidth / 2 ? 15d : -15d;
+        _hoverStoryboard?.Stop(PetVisual);
+        HoverTranslate.X = 0;
+
+        var nudge = new DoubleAnimation
+        {
+            From = 0,
+            To = direction,
+            Duration = TimeSpan.FromMilliseconds(250),
+            AutoReverse = true,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(nudge, HoverTranslate);
+        Storyboard.SetTargetProperty(nudge, new PropertyPath(TranslateTransform.XProperty));
+        _hoverStoryboard = new Storyboard();
+        _hoverStoryboard.Children.Add(nudge);
+        _hoverStoryboard.Begin(PetVisual, HandoffBehavior.SnapshotAndReplace, isControllable: true);
+        PlayOnce([4, 5, 4, 5], 8);
+    }
+
+    private void OnMouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || _isDragging)
+        {
+            return;
+        }
+
+        _suppressNextClick = true;
+        _sharinganState = (_sharinganState + 1) % 3;
+        StartRestAnimation();
+        e.Handled = true;
     }
 
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _mouseDown = e.GetPosition(this);
-        if (e.ButtonState == MouseButtonState.Pressed)
+        if (e.ChangedButton != MouseButton.Left)
         {
-            try
-            {
-                DragMove();
-            }
-            catch (InvalidOperationException)
-            {
-                // Mouse was released before WPF entered the native move loop.
-            }
+            return;
+        }
+
+        _mouseDown = e.GetPosition(this);
+        _dragOccurred = false;
+    }
+
+    private void OnMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_isDragging || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        var delta = current - _mouseDown;
+        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _dragOccurred = true;
+        _isDragging = true;
+        _idleActionTimer.Stop();
+        _hoverStoryboard?.Stop(PetVisual);
+        HoverTranslate.X = 0;
+        Sprite.Pause();
+        try
+        {
+            DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+            // Mouse was released before WPF entered the native move loop.
+        }
+        finally
+        {
+            _isDragging = false;
+            StartRestAnimation();
+            ScheduleNextIdleAction();
+            SavePlacementAfterDrag();
         }
     }
 
     private async void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        var current = e.GetPosition(this);
-        var distance = (current - _mouseDown).Length;
+        if (e.ChangedButton != MouseButton.Left || _dragOccurred)
+        {
+            return;
+        }
+
+        if (_suppressNextClick)
+        {
+            _suppressNextClick = false;
+            return;
+        }
+
+        if ((e.GetPosition(this) - _mouseDown).Length < 6)
+        {
+            _eventBus.Publish(new ActionRequested("clicked", DateTimeOffset.Now));
+        }
+
+        await SavePlacementAsync();
+    }
+
+    private async void SavePlacementAfterDrag() => await SavePlacementAsync();
+
+    private async Task SavePlacementAsync()
+    {
         _settings = _settings with { PetLeft = Left, PetTop = Top };
         var edge = MonitorPlacement.ClampAndDetectEdge(this);
         if (edge is not null && _settings.EdgeActionsEnabled)
@@ -180,10 +326,6 @@ public partial class PetWindow
 
         _settings = _settings with { PetLeft = Left, PetTop = Top };
         await _configStore.SaveAsync(_settings);
-        if (distance < 6)
-        {
-            _eventBus.Publish(new ActionRequested("clicked", DateTimeOffset.Now));
-        }
     }
 
     private void OpenTodos(object sender, RoutedEventArgs e)
@@ -236,6 +378,8 @@ public partial class PetWindow
             return;
         }
 
+        _idleActionTimer.Stop();
+        Sprite.Completed -= OnSpriteAnimationCompleted;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
     }
 

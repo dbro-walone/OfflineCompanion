@@ -13,6 +13,9 @@
         AutomationProperties.Name="桌面伙伴鸦影"
         MouseLeftButtonDown="OnMouseLeftButtonDown"
         MouseLeftButtonUp="OnMouseLeftButtonUp"
+        MouseMove="OnMouseMove"
+        MouseEnter="OnMouseEnter"
+        MouseDoubleClick="OnMouseDoubleClick"
         Closing="OnClosing">
     <Window.ContextMenu>
         <ContextMenu>
@@ -26,20 +29,25 @@
             <MenuItem Header="退出" Click="ExitApplication" />
         </ContextMenu>
     </Window.ContextMenu>
-    <Grid>
+    <Grid x:Name="PetVisual">
+        <Grid.RenderTransform>
+            <TranslateTransform x:Name="HoverTranslate" />
+        </Grid.RenderTransform>
         <animation:SpriteAnimationView x:Name="Sprite"
                                        Frames="0,1,2,3"
-                                       Fps="5"
-                                       ToolTip="左键拖动，右键打开菜单" />
+                                       Fps="2"
+                                       ToolTip="左键互动或拖动，双击切换写轮眼，右键打开菜单" />
         <Border x:Name="Fallback"
                 Visibility="Collapsed"
-                Background="#E6242838"
+                Background="#F2252830"
+                BorderBrush="#FF393D48"
+                BorderThickness="1"
                 CornerRadius="20"
                 Padding="18">
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="鸦影" Foreground="White" FontSize="26"
                            FontWeight="SemiBold" HorizontalAlignment="Center" />
-                <TextBlock Text="角色资源暂不可用" Foreground="#DDE1FF"
+                <TextBlock Text="角色资源暂不可用" Foreground="#FF8B8D98"
                            Margin="0,8,0,0" TextAlignment="Center" />
             </StackPanel>
         </Border>

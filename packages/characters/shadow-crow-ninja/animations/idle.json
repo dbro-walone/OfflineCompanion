@@ -1,7 +1,7 @@
 {
   "id": "idle",
   "atlas": "../atlases/base.png",
-  "fps": 5,
+  "fps": 2,
   "playMode": "loop",
   "interruptible": true,
   "resumePolicy": "restart",
