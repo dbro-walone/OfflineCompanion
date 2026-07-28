@@ -1,0 +1,66 @@
+name: Build Rust Windows Release
+
+on:
+  push:
+    branches: [rust-rewrite]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: offline-companion-rust-win-x64
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked --all-targets
+
+      - name: Build optimized standalone EXE
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Verify and stage release
+        shell: pwsh
+        run: |
+          $source = "target/x86_64-pc-windows-msvc/release/OfflineCompanion.exe"
+          if (-not (Test-Path $source)) {
+            Write-Error "OfflineCompanion.exe was not produced"
+            exit 1
+          }
+          New-Item -ItemType Directory -Force -Path publish | Out-Null
+          Copy-Item $source "publish/OfflineCompanion.exe"
+          $hash = (Get-FileHash "publish/OfflineCompanion.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  OfflineCompanion.exe" | Set-Content "publish/SHA256SUMS.txt" -Encoding ascii
+          $size = [math]::Round((Get-Item "publish/OfflineCompanion.exe").Length / 1MB, 1)
+          Write-Host "OfflineCompanion.exe: $size MB"
+          Get-Content "publish/SHA256SUMS.txt"
+
+      - name: Upload production Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineCompanion-rust-win-x64
+          path: publish/
+          if-no-files-found: error
+          retention-days: 30
+

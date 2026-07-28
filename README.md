@@ -1,53 +1,61 @@
-# 离线桌面陪伴助手
+# 离线桌面陪伴助手（Rust 版）
 
-基于 .NET 8 与 WPF 的 Windows 11 x64 原生桌面应用。应用完全离线运行，以原创角色“鸦影”提供桌面陪伴，并集成待办、定时提醒、番茄钟和久坐提醒。
+这是 `rust-rewrite` 分支的 Windows 原生 Rust 实现。界面使用 Slint 编译为本地桌面 UI，不包含 WebView、浏览器运行时、账号、遥测或网络请求；本地业务使用 Rust，数据继续保存在 SQLite 与 JSON 中。
 
 ## 已实现
 
-- 透明、无边框、置顶的 WPF 桌宠窗口；
-- PerMonitorV2 DPI 清单、多显示器工作区约束与边缘检测；
-- 逐帧 Sprite Atlas 播放器和声明式动画定义；
-- 行为状态机、P0～P8 优先级、动作选择与恢复策略；
-- 待办新增、完成/恢复、SQLite 持久化；
-- 一次性定时提醒、漏发窗口扫描和提醒气泡；
-- 番茄钟开始、暂停、继续和异常退出恢复；
-- 久坐状态计算、休息重置、延后次数和当日静默规则；
-- JSON 设置的临时文件写入、原子替换和备份回退；
-- 角色包/动作包扫描、严格 Manifest 解析和安装界面；
-- ZIP 路径穿越、符号链接、文件类型和解压大小防护；
-- 默认原创角色“鸦影”作为普通角色包安装，无角色专属引擎代码；
-- 领域单元测试和 SQLite/恶意 ZIP 集成测试。
+- 透明、无边框、置顶的原创桌宠“鸦影”，支持 Sprite Atlas、点击反馈、拖动、缩放和右键菜单；
+- 柔和圆角的待办、提醒、番茄钟、设置、扩展包与提醒气泡窗口；
+- 提醒触发时移动到当前活动显示器中央，并将气泡限制在显示器工作区；
+- 待办新增、完成/恢复、筛选、清理和关联番茄钟；
+- 一次性提醒、24 小时漏发扫描与延后 10 分钟；
+- 番茄钟开始、暂停、继续、停止、阶段切换和异常退出恢复；
+- 基于 Windows 最后输入时间的久坐提醒；
+- 深色/浅色主题、75%～140% 缩放、置顶、减少动态效果和久坐阈值设置；
+- SQLite WAL 与兼容原 C# 版本的数据表，升级到 Rust 版本后保留本地待办、提醒和番茄记录；
+- 安全 ZIP 扩展包导入：拒绝路径穿越、绝对路径、未知文件类型及超限解压内容；
+- 默认角色图集编译进 EXE，运行不需要外置资源目录。
 
-## 工程结构
+## 技术与内存策略
 
-```text
-src/
-  Companion.App/             WPF 启动、依赖注入与窗口
-  Companion.Presentation/    ViewModel、命令与 Sprite 控件
-  Companion.Application/     待办、提醒、番茄钟、久坐用例服务
-  Companion.Domain/          实体、状态机、优先级和调度规则
-  Companion.Packages/        Manifest、校验器和安全 ZIP 安装
-  Companion.Infrastructure/  SQLite、JSON、日志、时钟与系统活动
-packages/
-  characters/shadow-crow-ninja/
-  actions/shadow-crow-office/
-tests/
-  Companion.UnitTests/
-  Companion.IntegrationTests/
-  Companion.UiTests/
-```
+- Rust stable + Slint 原生桌面 UI；
+- winit Windows 后端与 FemtoVG 渲染器，不加载 CLR/WPF；
+- SQLite 使用 `rusqlite` 的静态内置 SQLite；
+- Release 启用 Thin LTO、单代码生成单元、符号剥离、`panic=abort` 和静态 CRT；
+- 动画复用单张图集，只切换源裁剪区域，不为每一帧创建独立窗口或控件。
 
-## 构建与运行
+实际常驻内存仍需在目标 Windows 电脑上以任务管理器或 Process Explorer 测量；不同显卡驱动会影响 GPU 共享内存统计。
 
-需要 Windows 11 x64、Visual Studio 2022 17.8+ 或 .NET 8 SDK。
+## Windows 构建
+
+安装 stable Rust（MSVC 工具链）和 Visual Studio 2022 Build Tools 后执行：
 
 ```powershell
-dotnet restore OfflineCompanion.sln
-dotnet test OfflineCompanion.sln -c Release
-dotnet run --project src/Companion.App/Companion.App.csproj
+cargo test --locked --all-targets
+cargo build --release --locked --target x86_64-pc-windows-msvc
 ```
 
-应用数据写入：
+产物：
+
+```text
+target\x86_64-pc-windows-msvc\release\OfflineCompanion.exe
+```
+
+## GitHub Actions 成品
+
+每次推送到 `rust-rewrite` 分支会触发 `Build Rust Windows Release`。流水线执行格式检查、Clippy、测试和 Windows Release 编译，并上传：
+
+```text
+OfflineCompanion-rust-win-x64/
+  OfflineCompanion.exe
+  SHA256SUMS.txt
+```
+
+从 GitHub 仓库的 **Actions → Build Rust Windows Release → Artifacts** 下载即可在 Windows 10/11 x64 使用。
+
+## 数据目录
+
+Rust 版沿用原程序位置：
 
 ```text
 %LocalAppData%\OfflineCompanion\
@@ -55,25 +63,13 @@ dotnet run --project src/Companion.App/Companion.App.csproj
   config\settings.json
   packages\characters\
   packages\actions\
-  cache\atlases\
   logs\
   backups\
 ```
 
-运行时不会创建 `HttpClient`、加载远程 WebView、发送遥测或上传崩溃报告。
+扩展包只允许 JSON、PNG、WebP、WAV、OGG 与 TXT。禁止 DLL、EXE、脚本、宏或其他可执行内容。
 
-## 扩展包边界
+## 分支说明
 
-扩展包只允许 JSON、PNG、WebP、WAV、OGG 与 TXT。禁止 DLL、EXE、BAT、CMD、PS1、JS、Python、宏和其他可执行内容。安装始终先解压到临时目录，通过验证后再原子移动到正式目录。
-
-默认角色素材是为本项目生成的原创占位素材，仅供个人学习和非商业使用；公开发布前请重新确认美术素材许可。
-
-## 尚需 Windows 实机完成的发布门槛
-
-- 多显示器负坐标、DPI 热切换和显示器热插拔矩阵；
-- 微软拼音与搜狗输入法候选窗交互；
-- 72 小时长稳、空闲 CPU、常驻内存和冷启动基线；
-- 锁屏、睡眠/恢复、全屏独占与 UAC 场景；
-- MSIX/安装包与开机启动集成。
-
-这些项目依赖 Windows 系统能力，不能在当前 macOS 工作区内完成实机验收。
+- `main`：原 .NET 8 / WPF 版本；
+- `rust-rewrite`：Rust 原生版本。

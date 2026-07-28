@@ -5,6 +5,7 @@ obj/
 *.suo
 TestResults/
 artifacts/
+target/
 *.db
 *.db-shm
 *.db-wal

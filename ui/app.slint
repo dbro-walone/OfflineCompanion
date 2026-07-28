@@ -1,0 +1,400 @@
+import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, Slider } from "std-widgets.slint";
+
+export global Theme {
+    in-out property <bool> light: false;
+    out property <brush> window-background: light ? #f8f6fa : #20212b;
+    out property <brush> panel-background: light ? #fffcff : #2a2c38;
+    out property <brush> popup-background: light ? #fffafff5 : #2a2c38f5;
+    out property <brush> panel-hover: light ? #f1edf5 : #3a3d4d;
+    out property <brush> stroke: light ? #e5dfe9 : #424554;
+    out property <brush> text-primary: light ? #272331 : #f0edf4;
+    out property <brush> text-secondary: light ? #706979 : #b8b3c2;
+    out property <brush> accent: light ? #706dd2 : #9b98f3;
+    out property <brush> error: light ? #d92d20 : #ff8888;
+}
+
+export struct TodoRow {
+    id: string,
+    title: string,
+    meta: string,
+    completed: bool,
+}
+
+component WindowSurface inherits Rectangle {
+    background: Theme.window-background;
+    border-color: Theme.stroke;
+    border-width: 1px;
+    border-radius: 18px;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: #08091270;
+}
+
+component HeaderBar inherits Rectangle {
+    in property <string> title;
+    callback dismiss-window();
+    callback begin-drag();
+    height: 46px;
+    background: Theme.panel-background;
+    border-radius: 17px;
+    Text {
+        text: root.title;
+        x: 18px;
+        vertical-alignment: center;
+        color: Theme.text-primary;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    TouchArea {
+        width: parent.width - 52px;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.begin-drag();
+            }
+        }
+    }
+    close-area := TouchArea {
+        x: parent.width - 44px;
+        width: 34px;
+        height: 34px;
+        y: 6px;
+        mouse-cursor: pointer;
+        clicked => { root.dismiss-window(); }
+    }
+    Rectangle {
+        x: close-area.x;
+        y: close-area.y;
+        width: close-area.width;
+        height: close-area.height;
+        border-radius: 17px;
+        background: close-area.has-hover ? Theme.panel-hover : transparent;
+        Text { text: "×"; color: Theme.text-primary; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
+component Card inherits Rectangle {
+    background: Theme.panel-background;
+    border-color: Theme.stroke;
+    border-width: 1px;
+    border-radius: 12px;
+}
+
+export component PetWindow inherits Window {
+    callback open-todos();
+    callback open-reminder();
+    callback open-timer();
+    callback open-settings();
+    callback open-packages();
+    callback pet-clicked();
+    callback exit();
+    callback drag-start(length, length);
+    callback drag-move(length, length);
+    callback drag-end();
+    in-out property <int> frame-index: 0;
+    in property <bool> reduce-motion: false;
+    in property <bool> topmost-enabled: true;
+    in property <float> pet-scale: 1.0;
+    in-out property <bool> menu-visible: false;
+    width: 250px * root.pet-scale;
+    height: 330px * root.pet-scale;
+    no-frame: true;
+    always-on-top: root.topmost-enabled;
+    background: transparent;
+    title: "鸦影";
+
+    pet-image := Image {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("../packages/characters/shadow-crow-ninja/atlases/base.png");
+        source-clip-x: Math.mod(root.frame-index, 4) * 384;
+        source-clip-y: (root.frame-index / 4) * 512;
+        source-clip-width: 384;
+        source-clip-height: 512;
+        image-fit: contain;
+        accessible-label: "桌面伙伴鸦影";
+    }
+    interaction := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                root.menu-visible = !root.menu-visible;
+            }
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.drag-start(self.mouse-x, self.mouse-y);
+            }
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                root.drag-end();
+            }
+        }
+        moved => { root.drag-move(self.mouse-x, self.mouse-y); }
+        clicked => { root.pet-clicked(); }
+    }
+    if interaction.has-hover && !root.reduce-motion: Rectangle {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 68px; height: 68px;
+        border-radius: 34px;
+        background: #8582e82f;
+        Text { text: "🛡"; font-size: 42px; horizontal-alignment: center; vertical-alignment: center; }
+        animate opacity { duration: 180ms; }
+    }
+    if root.menu-visible: Rectangle {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 194px; height: 246px;
+        background: Theme.popup-background;
+        border-color: #4b4e60;
+        border-width: 1px;
+        border-radius: 12px;
+        drop-shadow-blur: 18px;
+        drop-shadow-color: #08091280;
+        VerticalLayout {
+            padding: 8px;
+            spacing: 2px;
+            Button { text: "待办事项"; clicked => { root.menu-visible=false; root.open-todos(); } }
+            Button { text: "定时提醒"; clicked => { root.menu-visible=false; root.open-reminder(); } }
+            Button { text: "番茄钟"; clicked => { root.menu-visible=false; root.open-timer(); } }
+            Button { text: "角色与动作管理"; clicked => { root.menu-visible=false; root.open-packages(); } }
+            Button { text: "设置"; clicked => { root.menu-visible=false; root.open-settings(); } }
+            Button { text: "退出"; clicked => { root.exit(); } }
+        }
+    }
+}
+
+export component TodoWindow inherits Window {
+    callback dismiss-window();
+    callback begin-drag();
+    callback add-todo(string, string, string, int);
+    callback toggle-todo(string);
+    callback clear-completed();
+    callback refresh(bool);
+    callback start-focus(string);
+    in-out property <[TodoRow]> todos;
+    in-out property <string> status-text: "";
+    in-out property <bool> include-completed: false;
+    width: 660px; height: 720px; no-frame: true; background: transparent; title: "待办事项";
+    WindowSurface {
+        x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
+        HeaderBar { title: "待办事项"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
+        VerticalLayout {
+            x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 82px;
+            spacing: 12px;
+            Text { text: "待办事项"; color: Theme.text-primary; font-size: 28px; font-weight: 600; }
+            Text { text: "为任务安排番茄钟，数据仅保存在这台电脑上"; color: Theme.text-secondary; font-size: 13px; }
+            Card {
+                height: 166px;
+                GridLayout {
+                    padding: 14px; spacing: 8px;
+                    title-input := LineEdit { row: 0; colspan: 3; placeholder-text: "输入待办标题"; }
+                    due-date := LineEdit { row: 1; col: 0; placeholder-text: "日期 YYYY-MM-DD（可选）"; }
+                    due-time := LineEdit { row: 1; col: 1; placeholder-text: "时间 HH:mm"; }
+                    pomo := ComboBox { row: 1; col: 2; model: ["1 个番茄", "2 个番茄", "3 个番茄", "4 个番茄"]; }
+                    Button { row: 2; col: 2; text: "添加"; primary: true; clicked => {
+                        root.add-todo(title-input.text, due-date.text, due-time.text, pomo.current-index + 1);
+                        title-input.text = "";
+                    } }
+                    CheckBox { row: 2; col: 0; colspan: 2; text: "显示已完成"; checked <=> root.include-completed; toggled => { root.refresh(root.include-completed); } }
+                }
+            }
+            Text { text: root.status-text; color: Theme.error; font-size: 12px; }
+            ListView {
+                for todo[i] in root.todos: Card {
+                    height: 82px;
+                    HorizontalLayout {
+                        padding: 12px; spacing: 10px;
+                        CheckBox { checked: todo.completed; toggled => { root.toggle-todo(todo.id); } }
+                        VerticalLayout {
+                            Text { text: todo.title; color: Theme.text-primary; font-size: 15px; overflow: elide; }
+                            Text { text: todo.meta; color: Theme.text-secondary; font-size: 12px; }
+                        }
+                        Button { text: "开始专注"; clicked => { root.start-focus(todo.title); } }
+                    }
+                }
+            }
+            Button { text: "清除已完成"; clicked => { root.clear-completed(); } }
+        }
+    }
+}
+
+export component ReminderWindow inherits Window {
+    callback dismiss-window();
+    callback begin-drag();
+    callback save-reminder(string, string, string);
+    in-out property <string> status-text: "";
+    width: 430px; height: 410px; no-frame: true; background: transparent; title: "新建定时提醒";
+    WindowSurface {
+        x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
+        HeaderBar { title: "新建定时提醒"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
+        VerticalLayout {
+            x: 24px; y: 68px; width: parent.width - 48px; height: parent.height - 92px; spacing: 10px;
+            Text { text: "新建定时提醒"; color: Theme.text-primary; font-size: 26px; font-weight: 600; }
+            Text { text: "为重要事项设置一个本地提醒"; color: Theme.text-secondary; }
+            title-input := LineEdit { placeholder-text: "提醒标题"; }
+            date-input := LineEdit { placeholder-text: "日期 YYYY-MM-DD"; }
+            time-input := LineEdit { placeholder-text: "时间 HH:mm，例如 09:30"; }
+            Text { text: root.status-text; color: Theme.error; wrap: word-wrap; }
+            HorizontalLayout {
+                alignment: end;
+                Button { text: "取消"; clicked => { root.dismiss-window(); } }
+                Button { text: "保存"; primary: true; clicked => { root.save-reminder(title-input.text, date-input.text, time-input.text); } }
+            }
+        }
+    }
+}
+
+export component TimerWindow inherits Window {
+    callback dismiss-window();
+    callback begin-drag();
+    callback start();
+    callback toggle-pause();
+    callback stop();
+    in property <string> time-text: "25:00";
+    in property <string> phase-text: "专注";
+    in property <string> active-todo: "";
+    width: 420px; height: 390px; no-frame: true; background: transparent; title: "番茄钟";
+    WindowSurface {
+        x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
+        HeaderBar { title: "番茄钟"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
+        VerticalLayout {
+            x: 24px; y: 68px; width: parent.width - 48px; height: parent.height - 92px; spacing: 10px; alignment: center;
+            Text { text: "专注计时"; color: Theme.text-primary; font-size: 26px; font-weight: 600; horizontal-alignment: center; }
+            Text { text: root.active-todo == "" ? "保持节奏，专注当下" : "当前任务：" + root.active-todo; color: Theme.text-secondary; horizontal-alignment: center; }
+            Card {
+                height: 190px;
+                VerticalLayout {
+                    padding: 18px; spacing: 10px; alignment: center;
+                    Text { text: root.phase-text; color: Theme.accent; font-size: 14px; horizontal-alignment: center; }
+                    Text { text: root.time-text; color: #8582e8; font-size: 58px; font-weight: 300; horizontal-alignment: center; }
+                    HorizontalLayout {
+                        alignment: center;
+                        Button { text: "开始"; primary: true; clicked => { root.start(); } }
+                        Button { text: "暂停/继续"; clicked => { root.toggle-pause(); } }
+                        Button { text: "停止"; clicked => { root.stop(); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component SettingsWindow inherits Window {
+    callback dismiss-window();
+    callback begin-drag();
+    callback save(float, bool, bool, bool, int, int);
+    in-out property <float> scale-value: 1.0;
+    in-out property <bool> topmost-value: true;
+    in-out property <bool> idle-value: true;
+    in-out property <bool> reduce-motion-value: false;
+    in-out property <int> theme-index: 0;
+    in-out property <int> sedentary-minutes: 60;
+    width: 480px; height: 650px; no-frame: true; background: transparent; title: "设置";
+    WindowSurface {
+        x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
+        HeaderBar { title: "设置"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
+        ScrollView {
+            x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 88px;
+            VerticalLayout {
+                spacing: 12px;
+                Text { text: "设置"; color: Theme.text-primary; font-size: 28px; font-weight: 600; }
+                Text { text: "自定义鸦影的外观与行为"; color: Theme.text-secondary; }
+                Card {
+                    height: 250px;
+                    VerticalLayout {
+                        padding: 16px; spacing: 8px;
+                        Text { text: "桌宠"; color: Theme.text-primary; font-size: 18px; font-weight: 600; }
+                        Text { text: "缩放（75%～140%）：" + round(root.scale-value * 100) + "%"; color: Theme.text-secondary; }
+                        Slider { minimum: 0.75; maximum: 1.4; value <=> root.scale-value; }
+                        CheckBox { text: "保持置顶"; checked <=> root.topmost-value; }
+                        CheckBox { text: "启用主动空闲动作"; checked <=> root.idle-value; }
+                        CheckBox { text: "减少动态效果"; checked <=> root.reduce-motion-value; }
+                    }
+                }
+                Card {
+                    height: 145px;
+                    GridLayout {
+                        padding: 16px; spacing: 8px;
+                        Text { row: 0; colspan: 2; text: "提醒与外观"; color: Theme.text-primary; font-size: 18px; font-weight: 600; }
+                        Text { row: 1; col: 0; text: "主题"; color: Theme.text-secondary; }
+                        ComboBox { row: 1; col: 1; model: ["深色主题", "浅色主题"]; current-index <=> root.theme-index; }
+                        Text { row: 2; col: 0; text: "久坐阈值"; color: Theme.text-secondary; }
+                        ComboBox { row: 2; col: 1; model: ["30 分钟", "45 分钟", "60 分钟", "90 分钟", "120 分钟"]; current-index: root.sedentary-minutes == 30 ? 0 : root.sedentary-minutes == 45 ? 1 : root.sedentary-minutes == 60 ? 2 : root.sedentary-minutes == 90 ? 3 : 4; selected(value) => { root.sedentary-minutes = self.current-index == 0 ? 30 : self.current-index == 1 ? 45 : self.current-index == 2 ? 60 : self.current-index == 3 ? 90 : 120; } }
+                    }
+                }
+                Text { text: "应用完全离线运行，不创建 HTTP 客户端，不收集遥测。"; color: Theme.text-secondary; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: end;
+                    Button { text: "取消"; clicked => { root.dismiss-window(); } }
+                    Button { text: "保存并应用"; primary: true; clicked => { root.save(root.scale-value, root.topmost-value, root.idle-value, root.reduce-motion-value, root.theme-index, root.sedentary-minutes); } }
+                }
+            }
+        }
+    }
+}
+
+export component PackageWindow inherits Window {
+    callback dismiss-window();
+    callback begin-drag();
+    callback import-package();
+    in-out property <string> status-text: "默认角色：鸦影 1.0.0";
+    width: 590px; height: 530px; no-frame: true; background: transparent; title: "角色与动作包";
+    WindowSurface {
+        x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
+        HeaderBar { title: "角色与动作包"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
+        VerticalLayout {
+            x: 24px; y: 68px; width: parent.width - 48px; height: parent.height - 92px; spacing: 12px;
+            Text { text: "角色与动作包"; color: Theme.text-primary; font-size: 27px; font-weight: 600; }
+            Text { text: "扩展包只允许声明式 JSON 与本地媒体资源"; color: Theme.text-secondary; }
+            Card {
+                height: 78px;
+                HorizontalLayout {
+                    padding: 14px; spacing: 12px;
+                    Button { text: "导入 ZIP 扩展包"; primary: true; clicked => { root.import-package(); } }
+                    Text { text: root.status-text; color: Theme.text-secondary; wrap: word-wrap; vertical-alignment: center; }
+                }
+            }
+            Card {
+                height: 88px;
+                HorizontalLayout {
+                    padding: 14px;
+                    VerticalLayout {
+                        Text { text: "鸦影"; color: Theme.text-primary; font-size: 16px; font-weight: 600; }
+                        Text { text: "character.shadow-crow-ninja"; color: Theme.text-secondary; font-size: 12px; }
+                    }
+                    Text { text: "1.0.0"; color: Theme.accent; vertical-alignment: center; }
+                }
+            }
+            Card {
+                height: 88px;
+                HorizontalLayout {
+                    padding: 14px;
+                    VerticalLayout {
+                        Text { text: "鸦影·办公动作包"; color: Theme.text-primary; font-size: 16px; font-weight: 600; }
+                        Text { text: "action.shadow-crow.office"; color: Theme.text-secondary; font-size: 12px; }
+                    }
+                    Text { text: "1.0.0"; color: Theme.accent; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}
+
+export component NotificationWindow inherits Window {
+    callback dismiss();
+    callback snooze();
+    in property <string> message: "提醒";
+    width: 320px; height: 170px; no-frame: true; always-on-top: true; background: transparent; title: "提醒";
+    WindowSurface {
+        x: 10px; y: 10px; width: parent.width - 20px; height: parent.height - 20px;
+        VerticalLayout {
+            padding: 18px; spacing: 8px;
+            Text { text: "提醒"; color: Theme.accent; font-weight: 600; }
+            Text { text: root.message; color: Theme.text-primary; font-size: 15px; wrap: word-wrap; }
+            HorizontalLayout {
+                alignment: end;
+                Button { text: "延后 10 分钟"; clicked => { root.snooze(); } }
+                Button { text: "知道了"; primary: true; clicked => { root.dismiss(); } }
+            }
+        }
+    }
+}
