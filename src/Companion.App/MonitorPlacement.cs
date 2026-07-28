@@ -30,6 +30,40 @@ public static class MonitorPlacement
             info.Work.Bottom - info.Work.Top);
     }
 
+    public static Rect GetActiveWorkArea(Window fallbackWindow)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return SystemParameters.WorkArea;
+        }
+
+        var foregroundWindow = GetForegroundWindow();
+        if (foregroundWindow == IntPtr.Zero)
+        {
+            foregroundWindow = new WindowInteropHelper(fallbackWindow).Handle;
+        }
+
+        var monitor = MonitorFromWindow(foregroundWindow, MonitorDefaultToNearest);
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+        {
+            return GetWorkArea(fallbackWindow);
+        }
+
+        return new Rect(
+            info.Work.Left,
+            info.Work.Top,
+            info.Work.Right - info.Work.Left,
+            info.Work.Bottom - info.Work.Top);
+    }
+
+    public static void CenterOnActiveMonitor(Window window)
+    {
+        var work = GetActiveWorkArea(window);
+        window.Left = work.Left + Math.Max(0, (work.Width - window.Width) / 2);
+        window.Top = work.Top + Math.Max(0, (work.Height - window.Height) / 2);
+    }
+
     public static string? ClampAndDetectEdge(Window window, double threshold = 12)
     {
         var work = GetWorkArea(window);
@@ -79,6 +113,9 @@ public static class MonitorPlacement
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     [return: MarshalAs(UnmanagedType.Bool)]

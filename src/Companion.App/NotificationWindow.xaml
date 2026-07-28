@@ -6,8 +6,11 @@
         Background="Transparent" ShowInTaskbar="False"
         Topmost="True"
         AutomationProperties.Name="提醒气泡">
-    <Border Background="{DynamicResource PanelBackground}" CornerRadius="12"
-            Padding="18" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1">
+    <Border Background="{DynamicResource PanelBackground}" CornerRadius="18"
+            Padding="20" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="22" ShadowDepth="5" Opacity="0.3" Color="#FF080912" />
+        </Border.Effect>
         <StackPanel>
             <TextBlock Text="提醒" Foreground="{DynamicResource AccentHoverBrush}"
                        FontWeight="SemiBold" />

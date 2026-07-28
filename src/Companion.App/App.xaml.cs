@@ -92,6 +92,25 @@ public partial class App
         }
     }
 
+    private void DragSoftWindow(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Left ||
+            e.ClickCount != 1 ||
+            sender is not FrameworkElement { TemplatedParent: Window window })
+        {
+            return;
+        }
+
+        try
+        {
+            window.DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+            // The mouse button may be released before the native move loop begins.
+        }
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         _scheduler?.Stop();
@@ -136,6 +155,14 @@ public partial class App
         {
             Dispatcher.Invoke(() =>
             {
+                if (!petWindow.IsVisible)
+                {
+                    petWindow.Show();
+                }
+
+                MonitorPlacement.CenterOnActiveMonitor(petWindow);
+                petWindow.Activate();
+
                 var notification = new NotificationWindow(message.Title)
                 {
                     Owner = petWindow
