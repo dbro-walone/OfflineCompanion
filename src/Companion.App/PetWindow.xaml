@@ -30,9 +30,6 @@
         </ContextMenu>
     </Window.ContextMenu>
     <Grid x:Name="PetVisual">
-        <Grid.RenderTransform>
-            <TranslateTransform x:Name="HoverTranslate" />
-        </Grid.RenderTransform>
         <animation:SpriteAnimationView x:Name="Sprite"
                                        Frames="0,1,2,3"
                                        Fps="2"

@@ -4,6 +4,7 @@
         Title="设置" Width="480" Height="540"
         MinHeight="480"
         WindowStartupLocation="CenterOwner"
+        Loaded="OnLoaded"
         AutomationProperties.Name="设置窗口">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="24">
@@ -17,14 +18,10 @@
                     <TextBlock Text="缩放（75%～140%）"
                                Style="{StaticResource SecondaryText}" />
                     <Slider x:Name="ScaleSlider" Minimum="0.75" Maximum="1.4"
-                            TickFrequency="0.05" IsSnapToTickEnabled="True"
-                            ValueChanged="OnScaleChanged" />
-                    <CheckBox x:Name="TopmostCheck" Content="保持置顶" Margin="0,10,0,3"
-                              Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
-                    <CheckBox x:Name="IdleCheck" Content="启用主动空闲动作"
-                              Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
-                    <CheckBox x:Name="ReduceMotionCheck" Content="减少动态效果"
-                              Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
+                            TickFrequency="0.05" IsSnapToTickEnabled="True" />
+                    <CheckBox x:Name="TopmostCheck" Content="保持置顶" Margin="0,10,0,3" />
+                    <CheckBox x:Name="IdleCheck" Content="启用主动空闲动作" />
+                    <CheckBox x:Name="ReduceMotionCheck" Content="减少动态效果" />
                 </StackPanel>
             </Border>
 
@@ -38,8 +35,12 @@
                                Style="{StaticResource SecondaryText}" />
                 </StackPanel>
             </Border>
-            <Button Content="关闭" HorizontalAlignment="Right" Margin="0,18,0,0"
-                    Style="{StaticResource AccentButton}" Click="CloseWindow" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                        Margin="0,18,0,0">
+                <Button Content="取消" Click="CancelChanges" />
+                <Button x:Name="SaveButton" Content="保存并应用"
+                        Style="{StaticResource AccentButton}" Click="SaveAndApply" />
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </Window>

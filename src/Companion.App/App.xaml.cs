@@ -63,7 +63,11 @@ public partial class App
             services.AddTransient<TodoWindow>();
             services.AddTransient<ReminderWindow>();
             services.AddTransient<TimerWindow>();
-            services.AddTransient<SettingsWindow>();
+            services.AddTransient<SettingsWindow>(provider => new SettingsWindow(
+                provider.GetRequiredService<AppSettings>(),
+                provider.GetRequiredService<JsonConfigStore>(),
+                provider.GetRequiredService<AppDataPaths>(),
+                provider.GetRequiredService<IEventBus>()));
             services.AddTransient<PackageManagerWindow>();
             services.AddSingleton<PetWindow>();
 

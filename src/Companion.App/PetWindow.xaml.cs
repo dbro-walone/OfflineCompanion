@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Companion.Application.Events;
 using Companion.Infrastructure.Config;
@@ -16,6 +14,8 @@ namespace Companion.App;
 
 public partial class PetWindow
 {
+    private const double BaseWidth = 250;
+    private const double BaseHeight = 330;
     private static readonly int[] IdleFrames = [0, 1, 2, 3];
     private static readonly int[] ReactionFrames = [4, 5];
 
@@ -23,9 +23,9 @@ public partial class PetWindow
     private readonly JsonConfigStore _configStore;
     private readonly IEventBus _eventBus;
     private readonly DispatcherTimer _idleActionTimer;
+    private readonly IDisposable _settingsChangedSubscription;
     private AppSettings _settings;
     private Point _mouseDown;
-    private Storyboard? _hoverStoryboard;
     private bool _allowClose;
     private bool _dragOccurred;
     private bool _isDragging;
@@ -49,8 +49,8 @@ public partial class PetWindow
         _idleActionTimer.Tick += OnIdleActionTimerTick;
 
         Topmost = settings.Topmost;
-        Width *= settings.PetScale;
-        Height *= settings.PetScale;
+        Width = BaseWidth * settings.PetScale;
+        Height = BaseHeight * settings.PetScale;
         if (settings.PetLeft is not null && settings.PetTop is not null)
         {
             Left = settings.PetLeft.Value;
@@ -60,11 +60,12 @@ public partial class PetWindow
         LoadCharacter(paths, settings.CurrentCharacterId, validator);
         Sprite.Completed += OnSpriteAnimationCompleted;
         _eventBus.Subscribe<ActionRequested>(OnActionRequested);
+        _settingsChangedSubscription = _eventBus.Subscribe<SettingsChanged>(OnSettingsChanged);
         SourceInitialized += (_, _) => MonitorPlacement.ClampAndDetectEdge(this);
         Loaded += (_, _) =>
         {
             StartRestAnimation();
-            ScheduleNextIdleAction();
+            RestartIdleActionTimer();
         };
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
     }
@@ -177,6 +178,15 @@ public partial class PetWindow
         _idleActionTimer.Start();
     }
 
+    private void RestartIdleActionTimer()
+    {
+        _idleActionTimer.Stop();
+        if (_settings.IdleActionsEnabled && !_settings.ReduceMotion)
+        {
+            ScheduleNextIdleAction();
+        }
+    }
+
     private void OnIdleActionTimerTick(object? sender, EventArgs e)
     {
         ScheduleNextIdleAction();
@@ -204,6 +214,18 @@ public partial class PetWindow
         });
     }
 
+    private void OnSettingsChanged(SettingsChanged message)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _settings = message.Settings;
+            Width = BaseWidth * _settings.PetScale;
+            Height = BaseHeight * _settings.PetScale;
+            Topmost = _settings.Topmost;
+            RestartIdleActionTimer();
+        });
+    }
+
     private void OnMouseEnter(object sender, MouseEventArgs e)
     {
         if (_isDragging || _settings.ReduceMotion)
@@ -211,23 +233,6 @@ public partial class PetWindow
             return;
         }
 
-        var direction = e.GetPosition(this).X < ActualWidth / 2 ? 15d : -15d;
-        _hoverStoryboard?.Stop(PetVisual);
-        HoverTranslate.X = 0;
-
-        var nudge = new DoubleAnimation
-        {
-            From = 0,
-            To = direction,
-            Duration = TimeSpan.FromMilliseconds(250),
-            AutoReverse = true,
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(nudge, HoverTranslate);
-        Storyboard.SetTargetProperty(nudge, new PropertyPath(TranslateTransform.XProperty));
-        _hoverStoryboard = new Storyboard();
-        _hoverStoryboard.Children.Add(nudge);
-        _hoverStoryboard.Begin(PetVisual, HandoffBehavior.SnapshotAndReplace, isControllable: true);
         PlayOnce([4, 5, 4, 5], 8);
     }
 
@@ -273,8 +278,6 @@ public partial class PetWindow
         _dragOccurred = true;
         _isDragging = true;
         _idleActionTimer.Stop();
-        _hoverStoryboard?.Stop(PetVisual);
-        HoverTranslate.X = 0;
         Sprite.Pause();
         try
         {
@@ -288,7 +291,7 @@ public partial class PetWindow
         {
             _isDragging = false;
             StartRestAnimation();
-            ScheduleNextIdleAction();
+            RestartIdleActionTimer();
             SavePlacementAfterDrag();
         }
     }
@@ -380,6 +383,7 @@ public partial class PetWindow
         }
 
         _idleActionTimer.Stop();
+        _settingsChangedSubscription.Dispose();
         Sprite.Completed -= OnSpriteAnimationCompleted;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
     }
