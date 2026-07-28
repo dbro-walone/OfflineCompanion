@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Companion.Application.Events;
@@ -289,7 +290,25 @@ public partial class PetWindow
             return;
         }
 
-        PlayOnce([4, 5, 4, 5], 8);
+        // Show shield overlay with a pop-in animation — pet stays still
+        var fadeIn = new DoubleAnimation(0, 0.85, TimeSpan.FromMilliseconds(200));
+        var scaleUp = new DoubleAnimation(0.5, 1.0, TimeSpan.FromMilliseconds(200))
+        {
+            EasingFunction = new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut }
+        };
+        ShieldOverlay.BeginAnimation(OpacityProperty, fadeIn);
+        ShieldScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleUp);
+        ShieldScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleUp);
+    }
+
+    private void OnMouseLeave(object sender, MouseEventArgs e)
+    {
+        // Hide shield overlay
+        var fadeOut = new DoubleAnimation(0.85, 0, TimeSpan.FromMilliseconds(200));
+        var scaleDown = new DoubleAnimation(1.0, 0.5, TimeSpan.FromMilliseconds(200));
+        ShieldOverlay.BeginAnimation(OpacityProperty, fadeOut);
+        ShieldScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleDown);
+        ShieldScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleDown);
     }
 
     private void OnMouseDoubleClick(object sender, MouseButtonEventArgs e)

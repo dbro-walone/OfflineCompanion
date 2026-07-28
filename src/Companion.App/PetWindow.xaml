@@ -15,6 +15,7 @@
         MouseLeftButtonUp="OnMouseLeftButtonUp"
         MouseMove="OnMouseMove"
         MouseEnter="OnMouseEnter"
+        MouseLeave="OnMouseLeave"
         MouseDoubleClick="OnMouseDoubleClick"
         Closing="OnClosing">
     <Window.ContextMenu>
@@ -34,6 +35,19 @@
                                        Frames="0,1,2,3"
                                        Fps="2"
                                        ToolTip="左键互动或拖动，双击切换写轮眼，右键打开菜单" />
+        <!-- Shield overlay shown on mouse hover -->
+        <TextBlock x:Name="ShieldOverlay"
+                   Text="🛡️"
+                   FontSize="48"
+                   Opacity="0"
+                   IsHitTestVisible="False"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   RenderTransformOrigin="0.5,0.5">
+            <TextBlock.RenderTransform>
+                <ScaleTransform x:Name="ShieldScale" ScaleX="0.5" ScaleY="0.5" />
+            </TextBlock.RenderTransform>
+        </TextBlock>
         <Border x:Name="Fallback"
                 Visibility="Collapsed"
                 Background="{DynamicResource PanelBackground}"
