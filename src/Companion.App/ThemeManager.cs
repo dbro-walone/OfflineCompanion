@@ -11,7 +11,7 @@ public static class ThemeManager
     public static void Apply(string? theme)
     {
         var light = string.Equals(theme, Light, StringComparison.OrdinalIgnoreCase);
-        var resources = Application.Current.Resources;
+        var resources = System.Windows.Application.Current.Resources;
 
         SetBrush(resources, "WindowBackground", light ? "#FFF5F6FA" : "#FF1A1D24");
         SetBrush(resources, "PanelBackground", light ? "#FFFFFFFF" : "#FF252830");
