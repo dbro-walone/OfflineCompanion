@@ -20,34 +20,31 @@ public sealed class BundledPackageSeeder(AppDataPaths paths)
             return;
         }
 
-        await CopyEmbeddedResourcesAsync(
-            packageResources.Where(n => n.Contains(".characters.", StringComparison.OrdinalIgnoreCase)),
-            paths.Characters,
-            cancellationToken);
-        await CopyEmbeddedResourcesAsync(
-            packageResources.Where(n => n.Contains(".actions.", StringComparison.OrdinalIgnoreCase)),
-            paths.Actions,
-            cancellationToken);
-    }
-
-    private async Task CopyEmbeddedResourcesAsync(
-        IEnumerable<string> resources,
-        string destination,
-        CancellationToken cancellationToken)
-    {
-        var assembly = Assembly.GetExecutingAssembly();
-        foreach (var resourceName in resources)
+        foreach (var resourceName in packageResources)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // ResourcePrefix + "characters\shadow-crow-ninja\animations\idle.json"
-            var relativePath = resourceName[ResourcePrefix.Length..];
+            // Resource name: "OfflineCompanion.packages.characters\shadow-crow-ninja\animations\idle.json"
+            // Strip prefix, normalise separators
+            var relativePath = resourceName[ResourcePrefix.Length..]
+                .Replace('\\', Path.DirectorySeparatorChar)
+                .Replace('/', Path.DirectorySeparatorChar);
 
-            // Normalise: the LogicalName uses Windows-style backslashes from %(RecursiveDir)
-            // which end up embedded literally. Replace with OS-appropriate separator.
-            relativePath = relativePath.Replace('\\', Path.DirectorySeparatorChar);
+            // Route to the correct destination (characters/ or actions/)
+            string target;
+            if (relativePath.StartsWith("characters" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                target = Path.Combine(paths.Characters, relativePath["characters".Length..].TrimStart(Path.DirectorySeparatorChar));
+            }
+            else if (relativePath.StartsWith("actions" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                target = Path.Combine(paths.Actions, relativePath["actions".Length..].TrimStart(Path.DirectorySeparatorChar));
+            }
+            else
+            {
+                continue;
+            }
 
-            var target = Path.Combine(destination, relativePath);
             if (File.Exists(target))
             {
                 continue;

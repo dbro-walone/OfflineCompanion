@@ -50,44 +50,65 @@ public partial class PetWindow
 
     private void LoadCharacter(AppDataPaths paths, string id, ManifestValidator validator)
     {
-        var candidates = Directory.Exists(paths.Characters)
-            ? Directory.EnumerateFiles(paths.Characters, "manifest.json", SearchOption.AllDirectories)
-            : [];
-        var manifestPath = candidates.FirstOrDefault(path =>
+        try
         {
-            try
+            var candidates = Directory.Exists(paths.Characters)
+                ? Directory.EnumerateFiles(paths.Characters, "manifest.json", SearchOption.AllDirectories)
+                : [];
+            var manifestPath = candidates.FirstOrDefault(path =>
             {
-                return validator.Load(Path.GetDirectoryName(path)!).Id == id;
-            }
-            catch
+                try
+                {
+                    return validator.Load(Path.GetDirectoryName(path)!).Id == id;
+                }
+                catch
+                {
+                    return false;
+                }
+            });
+
+            if (manifestPath is null)
             {
-                return false;
+                ShowFallback();
+                return;
             }
-        });
 
-        if (manifestPath is null)
-        {
-            Fallback.Visibility = Visibility.Visible;
-            return;
+            var root = Path.GetDirectoryName(manifestPath)!;
+            var validation = validator.ValidateDirectory(root);
+            if (!validation.IsValid || validator.Load(root) is not CharacterManifest manifest)
+            {
+                ShowFallback();
+                return;
+            }
+
+            var idle = LoadAnimation(root, manifest.Actions[manifest.DefaultAction]);
+            var atlasPath = Path.GetFullPath(Path.Combine(
+                root,
+                Path.GetDirectoryName(manifest.Actions[manifest.DefaultAction]) ?? string.Empty,
+                idle.Atlas));
+            Sprite.AtlasPath = atlasPath;
+            Sprite.FrameWidth = manifest.Frame.Width;
+            Sprite.FrameHeight = manifest.Frame.Height;
+            Sprite.Frames = ExpandFrames(idle);
+            Sprite.Fps = idle.Fps;
+
+            // Give the sprite a moment to load the atlas; if it fails, show fallback
+            // (BitmapImage loads synchronously with CacheOption.OnLoad)
+            if (!File.Exists(atlasPath))
+            {
+                ShowFallback();
+            }
         }
-
-        var root = Path.GetDirectoryName(manifestPath)!;
-        var validation = validator.ValidateDirectory(root);
-        if (!validation.IsValid || validator.Load(root) is not CharacterManifest manifest)
+        catch
         {
-            Fallback.Visibility = Visibility.Visible;
-            return;
+            ShowFallback();
         }
+    }
 
-        var idle = LoadAnimation(root, manifest.Actions[manifest.DefaultAction]);
-        Sprite.AtlasPath = Path.GetFullPath(Path.Combine(
-            root,
-            Path.GetDirectoryName(manifest.Actions[manifest.DefaultAction]) ?? string.Empty,
-            idle.Atlas));
-        Sprite.FrameWidth = manifest.Frame.Width;
-        Sprite.FrameHeight = manifest.Frame.Height;
-        Sprite.Frames = ExpandFrames(idle);
-        Sprite.Fps = idle.Fps;
+    private void ShowFallback()
+    {
+        Fallback.Visibility = Visibility.Visible;
+        Sprite.Visibility = Visibility.Collapsed;
     }
 
     private static AnimationDefinition LoadAnimation(string root, string relativePath)
