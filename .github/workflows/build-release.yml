@@ -1,0 +1,39 @@
+name: Build Windows Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore OfflineCompanion.sln
+
+      - name: Build Release (self-contained single-file)
+        run: |
+          dotnet publish src/Companion.App/Companion.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o publish
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineCompanion-win-x64
+          path: publish/*.exe
+          retention-days: 30
