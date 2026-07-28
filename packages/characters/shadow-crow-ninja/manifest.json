@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "packageType": "character",
+  "id": "character.shadow-crow-ninja",
+  "name": "鸦影",
+  "version": "1.0.0",
+  "engineVersion": ">=1.0.0 <2.0.0",
+  "author": "Local",
+  "license": "personal-use",
+  "preview": "preview.png",
+  "defaultAction": "idle",
+  "defaultScale": 1.0,
+  "scaleRange": {
+    "min": 0.75,
+    "max": 1.4
+  },
+  "frame": {
+    "width": 384,
+    "height": 512
+  },
+  "actions": {
+    "idle": "animations/idle.json",
+    "clicked": "animations/clicked.json",
+    "dragged": "animations/dragged.json",
+    "reminder.default": "animations/reminder.json",
+    "reminder.todo": "animations/reminder.json",
+    "reminder.timer": "animations/reminder.json",
+    "reminder.sedentary": "animations/reminder.json",
+    "celebrate": "animations/celebrate.json",
+    "focus": "animations/focus.json",
+    "relax": "animations/relax.json",
+    "edge.left": "animations/edge-left.json",
+    "edge.right": "animations/edge-right.json"
+  }
+}

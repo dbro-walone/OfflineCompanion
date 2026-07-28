@@ -1,0 +1,12 @@
+{
+  "id": "edge.left",
+  "atlas": "../atlases/base.png",
+  "fps": 1,
+  "playMode": "hold-last",
+  "interruptible": true,
+  "resumePolicy": "idle",
+  "mirrorable": false,
+  "segments": {
+    "loop": { "start": 6, "end": 6, "repeat": 1 }
+  }
+}

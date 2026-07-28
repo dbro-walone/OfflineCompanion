@@ -1,0 +1,13 @@
+{
+  "id": "idle.thinking",
+  "atlas": "../atlases/office.png",
+  "fps": 4,
+  "playMode": "once",
+  "interruptible": true,
+  "resumePolicy": "restart",
+  "mirrorable": false,
+  "segments": {
+    "entry": { "start": 1, "end": 2, "repeat": 2 },
+    "exit": { "start": 3, "end": 3, "repeat": 1 }
+  }
+}

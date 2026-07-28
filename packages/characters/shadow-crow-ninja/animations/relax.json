@@ -1,0 +1,12 @@
+{
+  "id": "relax",
+  "atlas": "../atlases/base.png",
+  "fps": 2,
+  "playMode": "ping-pong",
+  "interruptible": true,
+  "resumePolicy": "resume",
+  "mirrorable": true,
+  "segments": {
+    "loop": { "start": 1, "end": 3, "repeat": 1 }
+  }
+}

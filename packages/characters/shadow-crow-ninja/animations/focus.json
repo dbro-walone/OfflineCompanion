@@ -1,0 +1,12 @@
+{
+  "id": "focus",
+  "atlas": "../atlases/base.png",
+  "fps": 3,
+  "playMode": "loop",
+  "interruptible": true,
+  "resumePolicy": "resume",
+  "mirrorable": true,
+  "segments": {
+    "loop": { "start": 1, "end": 2, "repeat": 1 }
+  }
+}

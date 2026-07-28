@@ -1,0 +1,12 @@
+{
+  "id": "idle",
+  "atlas": "../atlases/base.png",
+  "fps": 5,
+  "playMode": "loop",
+  "interruptible": true,
+  "resumePolicy": "restart",
+  "mirrorable": true,
+  "segments": {
+    "loop": { "start": 0, "end": 3, "repeat": 1 }
+  }
+}

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Companion.Application\Companion.Application.csproj" />
+    <ProjectReference Include="..\Companion.Packages\Companion.Packages.csproj" />
+  </ItemGroup>
+</Project>

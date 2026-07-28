@@ -1,0 +1,14 @@
+<Application x:Class="Companion.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <SolidColorBrush x:Key="PanelBackground" Color="#F21A1D27" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#FF6676D9" />
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Margin" Value="4" />
+            <Setter Property="MinWidth" Value="72" />
+        </Style>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "packageType": "action",
+  "id": "action.shadow-crow.office",
+  "name": "鸦影·办公动作包",
+  "version": "1.0.0",
+  "engineVersion": ">=1.0.0 <2.0.0",
+  "compatibleCharacters": [
+    {
+      "id": "character.shadow-crow-ninja",
+      "version": ">=1.0.0 <2.0.0"
+    }
+  ],
+  "priority": 100,
+  "actions": [
+    {
+      "id": "idle.thinking",
+      "trigger": "idle-random",
+      "weight": 20,
+      "cooldownSeconds": 180,
+      "animation": "animations/thinking.json"
+    }
+  ]
+}

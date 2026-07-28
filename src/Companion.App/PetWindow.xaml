@@ -1,0 +1,47 @@
+<Window x:Class="Companion.App.PetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animation="clr-namespace:Companion.Presentation.Animation;assembly=Companion.Presentation"
+        Title="鸦影"
+        Width="250" Height="330"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        AutomationProperties.Name="桌面伙伴鸦影"
+        MouseLeftButtonDown="OnMouseLeftButtonDown"
+        MouseLeftButtonUp="OnMouseLeftButtonUp"
+        Closing="OnClosing">
+    <Window.ContextMenu>
+        <ContextMenu>
+            <MenuItem Header="待办事项" Click="OpenTodos" />
+            <MenuItem Header="定时提醒" Click="OpenReminder" />
+            <MenuItem Header="番茄钟" Click="OpenTimer" />
+            <Separator />
+            <MenuItem Header="切换角色与动作管理" Click="OpenPackages" />
+            <MenuItem Header="设置" Click="OpenSettings" />
+            <Separator />
+            <MenuItem Header="退出" Click="ExitApplication" />
+        </ContextMenu>
+    </Window.ContextMenu>
+    <Grid>
+        <animation:SpriteAnimationView x:Name="Sprite"
+                                       Frames="0,1,2,3"
+                                       Fps="5"
+                                       ToolTip="左键拖动，右键打开菜单" />
+        <Border x:Name="Fallback"
+                Visibility="Collapsed"
+                Background="#E6242838"
+                CornerRadius="20"
+                Padding="18">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="鸦影" Foreground="White" FontSize="26"
+                           FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock Text="角色资源暂不可用" Foreground="#DDE1FF"
+                           Margin="0,8,0,0" TextAlignment="Center" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
