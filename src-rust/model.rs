@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +22,7 @@ pub struct Reminder {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub pet_left: Option<i32>,
     pub pet_top: Option<i32>,
@@ -28,7 +31,10 @@ pub struct AppSettings {
     pub idle_actions_enabled: bool,
     pub reduce_motion: bool,
     pub theme: String,
+    #[serde(rename = "sedentaryThresholdMinutes", alias = "sedentaryMinutes")]
     pub sedentary_minutes: u32,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Default for AppSettings {
@@ -42,6 +48,7 @@ impl Default for AppSettings {
             reduce_motion: false,
             theme: "dark".into(),
             sedentary_minutes: 60,
+            extra: BTreeMap::new(),
         }
     }
 }
@@ -68,5 +75,22 @@ impl Default for PomodoroState {
             running: false,
             paused: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_unknown_csharp_settings() {
+        let json = r#"{"schemaVersion":1,"currentCharacterId":"character.custom","petScale":1.2,"sedentaryThresholdMinutes":90}"#;
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.pet_scale, 1.2);
+        assert_eq!(settings.sedentary_minutes, 90);
+
+        let saved = serde_json::to_value(settings).unwrap();
+        assert_eq!(saved["currentCharacterId"], "character.custom");
+        assert_eq!(saved["schemaVersion"], 1);
     }
 }
