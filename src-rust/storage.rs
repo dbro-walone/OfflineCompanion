@@ -181,13 +181,47 @@ impl Store {
         Ok(())
     }
 
-    pub fn take_due_reminders(&self, now: DateTime<Local>) -> Result<Vec<Reminder>> {
-        let cutoff = now - chrono::Duration::hours(24);
+    pub fn list_pending_reminders(&self) -> Result<Vec<Reminder>> {
         let mut statement = self.connection.prepare(
-            "SELECT id,title,next_trigger_at,status FROM reminders WHERE status=0 AND next_trigger_at<=?1 AND next_trigger_at>=?2 ORDER BY next_trigger_at"
+            "SELECT id,title,next_trigger_at,status FROM reminders WHERE status=0 ORDER BY next_trigger_at,created_at",
+        )?;
+        let raw = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i32>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(raw
+            .into_iter()
+            .filter_map(|(id, title, trigger_at, status)| {
+                DateTime::parse_from_rfc3339(&trigger_at)
+                    .ok()
+                    .map(|value| Reminder {
+                        id,
+                        title,
+                        trigger_at: value.with_timezone(&Local),
+                        fired: status != 0,
+                    })
+            })
+            .collect())
+    }
+
+    pub fn delete_reminder(&self, id: &str) -> Result<()> {
+        self.connection
+            .execute("DELETE FROM reminders WHERE id=?1 AND status=0", [id])?;
+        Ok(())
+    }
+
+    pub fn take_due_reminders(&self, now: DateTime<Local>) -> Result<Vec<Reminder>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id,title,next_trigger_at,status FROM reminders WHERE status=0 AND next_trigger_at<=?1 ORDER BY next_trigger_at"
         )?;
         let reminders = statement
-            .query_map(params![now.to_rfc3339(), cutoff.to_rfc3339()], |row| {
+            .query_map([now.to_rfc3339()], |row| {
                 let raw: String = row.get(2)?;
                 Ok(Reminder {
                     id: row.get(0)?,
@@ -301,5 +335,49 @@ mod tests {
         assert_eq!(items[0].title, "测试任务");
         assert!(store.toggle_todo(&items[0].id).unwrap());
         assert!(store.list_todos(false).unwrap().is_empty());
+    }
+
+    #[test]
+    fn manages_multiple_reminders_and_recovers_overdue_items() {
+        let store = Store {
+            connection: Connection::open_in_memory().unwrap(),
+        };
+        store
+            .connection
+            .execute_batch(
+                "CREATE TABLE reminders (
+                    id TEXT PRIMARY KEY,todo_id TEXT,title TEXT NOT NULL,
+                    schedule_type INTEGER NOT NULL,local_time TEXT NOT NULL,
+                    weekdays TEXT NOT NULL,start_date TEXT,end_date TEXT,
+                    next_trigger_at TEXT NOT NULL,status INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+        let now = Local::now();
+        store
+            .add_reminder("第一条", now + chrono::Duration::minutes(5))
+            .unwrap();
+        store
+            .add_reminder("第二条", now + chrono::Duration::minutes(10))
+            .unwrap();
+        let pending = store.list_pending_reminders().unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].title, "第一条");
+        store.delete_reminder(&pending[0].id).unwrap();
+        assert_eq!(store.list_pending_reminders().unwrap().len(), 1);
+
+        store
+            .connection
+            .execute(
+                "UPDATE reminders SET next_trigger_at=?1",
+                [now.checked_sub_signed(chrono::Duration::days(3))
+                    .unwrap()
+                    .to_rfc3339()],
+            )
+            .unwrap();
+        let due = store.take_due_reminders(now).unwrap();
+        assert_eq!(due.len(), 1);
+        assert!(store.list_pending_reminders().unwrap().is_empty());
     }
 }

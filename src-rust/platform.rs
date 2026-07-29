@@ -15,8 +15,10 @@ impl WorkArea {
 }
 
 #[cfg(windows)]
-pub fn active_work_area() -> WorkArea {
+pub fn active_work_area(window: &slint::Window) -> WorkArea {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{
+        Foundation::HWND,
         Graphics::Gdi::{
             GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
         },
@@ -24,7 +26,17 @@ pub fn active_work_area() -> WorkArea {
     };
 
     unsafe {
-        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
+        let hwnd = window
+            .window_handle()
+            .ok()
+            .and_then(|handle| match handle.as_raw() {
+                RawWindowHandle::Win32(value) => {
+                    Some(HWND(value.hwnd.get() as *mut std::ffi::c_void))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(GetForegroundWindow);
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             ..Default::default()
@@ -47,13 +59,32 @@ pub fn active_work_area() -> WorkArea {
 }
 
 #[cfg(not(windows))]
-pub fn active_work_area() -> WorkArea {
-    WorkArea {
-        left: 0,
-        top: 0,
-        right: 1920,
-        bottom: 1080,
-    }
+pub fn active_work_area(window: &slint::Window) -> WorkArea {
+    use slint::winit_030::WinitWindowAccessor;
+
+    window
+        .with_winit_window(|window| {
+            window
+                .current_monitor()
+                .or_else(|| window.available_monitors().next())
+                .map(|monitor| {
+                    let position = monitor.position();
+                    let size = monitor.size();
+                    WorkArea {
+                        left: position.x,
+                        top: position.y,
+                        right: position.x + size.width as i32,
+                        bottom: position.y + size.height as i32,
+                    }
+                })
+        })
+        .flatten()
+        .unwrap_or(WorkArea {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        })
 }
 
 #[cfg(windows)]
@@ -75,7 +106,7 @@ pub fn idle_millis() -> u64 {
 }
 
 #[cfg(windows)]
-pub fn begin_window_drag(window: &slint::Window) {
+pub fn begin_window_drag(window: &slint::Window) -> bool {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{
         Foundation::{HWND, LPARAM, WPARAM},
@@ -87,10 +118,10 @@ pub fn begin_window_drag(window: &slint::Window) {
 
     let handle = window.window_handle();
     let Ok(raw) = handle.window_handle() else {
-        return;
+        return false;
     };
     let RawWindowHandle::Win32(win32) = raw.as_raw() else {
-        return;
+        return false;
     };
     unsafe {
         let _ = ReleaseCapture();
@@ -101,10 +132,17 @@ pub fn begin_window_drag(window: &slint::Window) {
             Some(LPARAM(0)),
         );
     }
+    true
 }
 
 #[cfg(not(windows))]
-pub fn begin_window_drag(_window: &slint::Window) {}
+pub fn begin_window_drag(window: &slint::Window) -> bool {
+    use slint::winit_030::WinitWindowAccessor;
+
+    window
+        .with_winit_window(|window| window.drag_window().is_ok())
+        .unwrap_or(false)
+}
 
 #[cfg(not(windows))]
 pub fn idle_millis() -> u64 {

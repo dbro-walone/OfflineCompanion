@@ -1,4 +1,4 @@
-name: Build Rust Windows Release
+name: Build Rust Desktop Releases
 
 on:
   push:
@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  test-and-build:
+  windows:
+    name: Windows x64
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -64,3 +65,62 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  macos:
+    name: macOS Universal
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: offline-companion-rust-macos-universal
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked --all-targets
+
+      - name: Build both macOS architectures
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+
+      - name: Create universal application bundle
+        run: |
+          APP="publish/OfflineCompanion.app"
+          mkdir -p "$APP/Contents/MacOS"
+          lipo -create \
+            target/aarch64-apple-darwin/release/OfflineCompanion \
+            target/x86_64-apple-darwin/release/OfflineCompanion \
+            -output "$APP/Contents/MacOS/OfflineCompanion"
+          cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
+          chmod +x "$APP/Contents/MacOS/OfflineCompanion"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" publish/OfflineCompanion-macOS-universal.zip
+          shasum -a 256 publish/OfflineCompanion-macOS-universal.zip > publish/SHA256SUMS.txt
+          lipo -info "$APP/Contents/MacOS/OfflineCompanion"
+
+      - name: Upload production macOS application
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineCompanion-rust-macOS-universal
+          path: |
+            publish/OfflineCompanion-macOS-universal.zip
+            publish/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
