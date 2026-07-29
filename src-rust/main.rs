@@ -769,7 +769,7 @@ fn initialize_reminder_datetime_pickers(window: &ReminderWindow) {
 fn datetime_picker_values() -> (Vec<SharedString>, Vec<SharedString>, i32, i32) {
     let now = Local::now();
     let target = now + chrono::Duration::minutes(10);
-    let rounded_slot = (target.num_seconds_from_midnight() + 15 * 60 - 1) / (15 * 60);
+    let rounded_slot = target.num_seconds_from_midnight().div_ceil(15 * 60);
     let rounded_day_offset = i64::from(rounded_slot / (24 * 4));
     let target_day_offset = (target.date_naive() - now.date_naive()).num_days();
     let date_index = (target_day_offset + rounded_day_offset).clamp(0, 29) as i32;
