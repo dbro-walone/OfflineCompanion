@@ -4,6 +4,7 @@
         Title="待办事项" Width="660" Height="720"
         Style="{StaticResource SoftWindowStyle}"
         MinWidth="560" MinHeight="580"
+        Topmost="True"
         WindowStartupLocation="CenterOwner"
         AutomationProperties.Name="待办事项窗口">
     <Grid Margin="22">

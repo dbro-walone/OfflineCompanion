@@ -22,7 +22,17 @@ public sealed class SpriteAnimationView : Image
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
         _timer = new DispatcherTimer(DispatcherPriority.Render);
         _timer.Tick += (_, _) => Advance();
-        Loaded += (_, _) => Restart();
+        Loaded += (_, _) =>
+        {
+            if (!_playOnce)
+            {
+                ShowStaticFrame(0);
+            }
+            else
+            {
+                Restart();
+            }
+        };
         Unloaded += (_, _) => _timer.Stop();
     }
 

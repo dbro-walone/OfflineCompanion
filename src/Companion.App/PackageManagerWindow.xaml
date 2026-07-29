@@ -4,6 +4,7 @@
         Title="角色与动作包" Width="590" Height="530"
         Style="{StaticResource SoftWindowStyle}"
         MinWidth="500" MinHeight="420"
+        Topmost="True"
         WindowStartupLocation="CenterOwner"
         AutomationProperties.Name="角色与动作包管理窗口">
     <Grid Margin="24">

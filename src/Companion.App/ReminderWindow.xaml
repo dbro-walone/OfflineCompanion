@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="新建定时提醒" Width="430" Height="365"
         Style="{StaticResource SoftWindowStyle}"
+        Topmost="True"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         AutomationProperties.Name="新建定时提醒窗口">

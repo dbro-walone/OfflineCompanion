@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="番茄钟" Width="420" Height="350"
         Style="{StaticResource SoftWindowStyle}"
+        Topmost="True"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         AutomationProperties.Name="番茄钟窗口">

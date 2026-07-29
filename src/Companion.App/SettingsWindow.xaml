@@ -4,6 +4,7 @@
         Title="设置" Width="480" Height="620"
         Style="{StaticResource SoftWindowStyle}"
         MinHeight="480"
+        Topmost="True"
         WindowStartupLocation="CenterOwner"
         Loaded="OnLoaded"
         AutomationProperties.Name="设置窗口">

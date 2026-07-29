@@ -19,7 +19,7 @@
         MouseDoubleClick="OnMouseDoubleClick"
         Closing="OnClosing">
     <Window.ContextMenu>
-        <ContextMenu>
+        <ContextMenu Placement="MousePoint">
             <MenuItem Header="待办事项" Click="OpenTodos" />
             <MenuItem Header="定时提醒" Click="OpenReminder" />
             <MenuItem Header="番茄钟" Click="OpenTimer" />
