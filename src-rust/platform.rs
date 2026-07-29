@@ -35,8 +35,11 @@ pub fn active_work_area(window: &slint::Window) -> WorkArea {
                     Some(HWND(value.hwnd.get() as *mut std::ffi::c_void))
                 }
                 _ => None,
-            })
-            .unwrap_or_else(GetForegroundWindow);
+            });
+        let hwnd = match hwnd {
+            Some(hwnd) => hwnd,
+            None => GetForegroundWindow(),
+        };
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
