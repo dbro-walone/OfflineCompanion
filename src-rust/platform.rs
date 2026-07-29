@@ -26,7 +26,8 @@ pub fn active_work_area(window: &slint::Window) -> WorkArea {
     };
 
     unsafe {
-        let hwnd = window
+        let handle = window.window_handle();
+        let hwnd = handle
             .window_handle()
             .ok()
             .and_then(|handle| match handle.as_raw() {
