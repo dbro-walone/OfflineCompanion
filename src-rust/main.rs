@@ -112,12 +112,14 @@ fn run() -> Result<()> {
         let index = animation_index.clone();
         let settings = settings.clone();
         let mut idle_frame = 0i32;
-        animation_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
+        animation_timer.start(TimerMode::Repeated, Duration::from_secs(20), move || {
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
             let sequence = sequences.borrow();
             if sequence.is_empty() {
+                // Idle pose change every ~20 seconds (not every 500ms which caused flickering).
+                // Cycle through poses 0→1→2→3 like the C# version.
                 if settings.borrow().idle_actions_enabled {
                     idle_frame = (idle_frame + 1) % 4;
                     pet.set_frame_index(idle_frame);

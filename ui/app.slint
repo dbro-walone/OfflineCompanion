@@ -173,7 +173,7 @@ export component TodoWindow inherits Window {
     in-out property <[TodoRow]> todos;
     in-out property <string> status-text: "";
     in-out property <bool> include-completed: false;
-    width: 660px; height: 720px; no-frame: true; background: transparent; title: "待办事项";
+    width: 660px; height: 720px; no-frame: true; always-on-top: true; background: transparent; title: "待办事项";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
         HeaderBar { title: "待办事项"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
@@ -222,7 +222,7 @@ export component ReminderWindow inherits Window {
     callback begin-drag();
     callback save-reminder(string, string, string);
     in-out property <string> status-text: "";
-    width: 430px; height: 410px; no-frame: true; background: transparent; title: "新建定时提醒";
+    width: 430px; height: 410px; no-frame: true; always-on-top: true; background: transparent; title: "新建定时提醒";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
         HeaderBar { title: "新建定时提醒"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
@@ -252,7 +252,7 @@ export component TimerWindow inherits Window {
     in property <string> time-text: "25:00";
     in property <string> phase-text: "专注";
     in property <string> active-todo: "";
-    width: 420px; height: 390px; no-frame: true; background: transparent; title: "番茄钟";
+    width: 420px; height: 390px; no-frame: true; always-on-top: true; background: transparent; title: "番茄钟";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
         HeaderBar { title: "番茄钟"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
@@ -288,7 +288,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> reduce-motion-value: false;
     in-out property <int> theme-index: 0;
     in-out property <int> sedentary-minutes: 60;
-    width: 480px; height: 650px; no-frame: true; background: transparent; title: "设置";
+    width: 480px; height: 650px; no-frame: true; always-on-top: true; background: transparent; title: "设置";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
         HeaderBar { title: "设置"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
@@ -337,7 +337,7 @@ export component PackageWindow inherits Window {
     callback begin-drag();
     callback import-package();
     in-out property <string> status-text: "默认角色：鸦影 1.0.0";
-    width: 590px; height: 530px; no-frame: true; background: transparent; title: "角色与动作包";
+    width: 590px; height: 530px; no-frame: true; always-on-top: true; background: transparent; title: "角色与动作包";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
         HeaderBar { title: "角色与动作包"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
