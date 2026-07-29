@@ -5,12 +5,16 @@ mod packages;
 mod platform;
 mod storage;
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDateTime, TimeZone};
+use chrono::{Local, NaiveDateTime, TimeZone, Timelike};
 use model::{AppSettings, PomodoroPhase, PomodoroState};
-use slint::{ComponentHandle, ModelRc, PhysicalPosition, Timer, TimerMode, VecModel};
+use slint::{ComponentHandle, ModelRc, PhysicalPosition, SharedString, Timer, TimerMode, VecModel};
 use storage::{AppPaths, Store};
 
 slint::include_modules!();
@@ -30,6 +34,7 @@ fn run() -> Result<()> {
     let store = Rc::new(Store::open(&paths.database)?);
     let settings = Rc::new(RefCell::new(storage::load_settings(&paths.settings)));
     let pomodoro = Rc::new(RefCell::new(store.load_pomodoro()?.unwrap_or_default()));
+    let pomodoro_five_minute_alerted = Rc::new(Cell::new(false));
     let active_todo = Rc::new(RefCell::new(String::new()));
     let notification_message = Rc::new(RefCell::new(String::new()));
 
@@ -54,6 +59,8 @@ fn run() -> Result<()> {
     apply_settings_to_pet(&pet, &settings.borrow());
     restore_pet_position(&pet, &settings.borrow());
     refresh_todos(&todos, &store, false);
+    initialize_todo_datetime_pickers(&todos);
+    initialize_reminder_datetime_pickers(&reminder);
 
     wire_basic_windows(
         &pet,
@@ -68,6 +75,7 @@ fn run() -> Result<()> {
         &timer_window,
         store.clone(),
         pomodoro.clone(),
+        pomodoro_five_minute_alerted.clone(),
         active_todo.clone(),
     );
     wire_reminders(&reminder, store.clone());
@@ -76,6 +84,7 @@ fn run() -> Result<()> {
         &timer_window,
         &pet,
         pomodoro.clone(),
+        pomodoro_five_minute_alerted.clone(),
         active_todo.clone(),
         store.clone(),
     );
@@ -110,18 +119,12 @@ fn run() -> Result<()> {
         let weak_pet = pet.as_weak();
         let sequences = animation_sequence.clone();
         let index = animation_index.clone();
-        let settings = settings.clone();
-        let mut idle_frame = 0i32;
         animation_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
             let sequence = sequences.borrow();
             if sequence.is_empty() {
-                if settings.borrow().idle_actions_enabled {
-                    idle_frame = (idle_frame + 1) % 4;
-                    pet.set_frame_index(idle_frame);
-                }
                 return;
             }
             let mut position = index.borrow_mut();
@@ -132,6 +135,23 @@ fn run() -> Result<()> {
                 drop(sequence);
                 sequences.borrow_mut().clear();
                 *index.borrow_mut() = 0;
+            }
+        });
+    }
+
+    let idle_animation_timer = Timer::default();
+    {
+        let weak_pet = pet.as_weak();
+        let sequences = animation_sequence.clone();
+        let settings = settings.clone();
+        let mut idle_frame = 0i32;
+        idle_animation_timer.start(TimerMode::Repeated, Duration::from_secs(20), move || {
+            if !settings.borrow().idle_actions_enabled || !sequences.borrow().is_empty() {
+                return;
+            }
+            if let Some(pet) = weak_pet.upgrade() {
+                idle_frame = (idle_frame + 1) % 4;
+                pet.set_frame_index(idle_frame);
             }
         });
     }
@@ -178,6 +198,7 @@ fn run() -> Result<()> {
         let weak_notification = notification.as_weak();
         let message = notification_message.clone();
         let sequence = animation_sequence.clone();
+        let five_minute_alerted = pomodoro_five_minute_alerted.clone();
         pomodoro_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
             let mut state = state.borrow_mut();
             if !state.running || state.paused {
@@ -186,6 +207,27 @@ fn run() -> Result<()> {
             state.remaining_seconds = state.remaining_seconds.saturating_sub(1);
             if let Some(timer) = weak_timer.upgrade() {
                 update_timer_view(&timer, &state, "");
+            }
+            if state.phase == PomodoroPhase::Focus
+                && state.remaining_seconds == 5 * 60
+                && !five_minute_alerted.replace(true)
+            {
+                let text = "当前番茄时钟还剩5分钟";
+                *message.borrow_mut() = text.into();
+                *sequence.borrow_mut() = vec![7, 7, 7, 3];
+                if let (Some(notification), Some(pet)) =
+                    (weak_notification.upgrade(), weak_pet.upgrade())
+                {
+                    notification.set_message(text.into());
+                    center_window_on_active_monitor(
+                        pet.window(),
+                        pet.window().size().width,
+                        pet.window().size().height,
+                    );
+                    position_notification(&notification, &pet);
+                    let _ = pet.show();
+                    let _ = notification.show();
+                }
             }
             if state.remaining_seconds > 0 {
                 return;
@@ -206,6 +248,7 @@ fn run() -> Result<()> {
             } else {
                 5 * 60
             };
+            five_minute_alerted.set(false);
             let _ = store.save_pomodoro(&state);
             *message.borrow_mut() = text.into();
             *sequence.borrow_mut() = vec![7, 7, 7, 3];
@@ -277,25 +320,40 @@ fn wire_basic_windows(
     packages: &PackageWindow,
 ) {
     macro_rules! open_window {
-        ($callback:ident, $window:expr) => {{
+        ($callback:ident, $window:expr, $offset_x:expr, $offset_y:expr, $prepare:expr) => {{
             let weak = $window.as_weak();
             pet.$callback(move || {
                 if let Some(window) = weak.upgrade() {
-                    center_window_on_active_monitor(
+                    ($prepare)(&window);
+                    position_window_on_active_monitor(
                         window.window(),
                         window.window().size().width,
                         window.window().size().height,
+                        $offset_x,
+                        $offset_y,
                     );
                     let _ = window.show();
                 }
             });
         }};
     }
-    open_window!(on_open_todos, todos);
-    open_window!(on_open_reminder, reminder);
-    open_window!(on_open_timer, timer);
-    open_window!(on_open_settings, settings);
-    open_window!(on_open_packages, packages);
+    open_window!(
+        on_open_todos,
+        todos,
+        -140,
+        -80,
+        initialize_todo_datetime_pickers
+    );
+    open_window!(
+        on_open_reminder,
+        reminder,
+        -50,
+        -20,
+        initialize_reminder_datetime_pickers
+    );
+    open_window!(on_open_timer, timer, 50, 20, |_| {});
+    open_window!(on_open_settings, settings, 120, 60, |_| {});
+    open_window!(on_open_packages, packages, 180, -60, |_| {});
 
     let weak = todos.as_weak();
     todos.on_dismiss_window(move || {
@@ -350,6 +408,7 @@ fn wire_todos(
     timer: &TimerWindow,
     store: Rc<Store>,
     state: Rc<RefCell<PomodoroState>>,
+    five_minute_alerted: Rc<Cell<bool>>,
     active_todo: Rc<RefCell<String>>,
 ) {
     {
@@ -406,6 +465,7 @@ fn wire_todos(
         let weak_timer = timer.as_weak();
         todo_window.on_start_focus(move |title| {
             *active_todo.borrow_mut() = title.to_string();
+            five_minute_alerted.set(false);
             let mut state = state.borrow_mut();
             *state = PomodoroState {
                 running: true,
@@ -415,7 +475,7 @@ fn wire_todos(
             if let Some(timer) = weak_timer.upgrade() {
                 timer.set_active_todo(title);
                 update_timer_view(&timer, &state, "");
-                let _ = timer.show();
+                let _ = timer.hide();
             }
         });
     }
@@ -442,6 +502,7 @@ fn wire_timer(
     window: &TimerWindow,
     pet: &PetWindow,
     state: Rc<RefCell<PomodoroState>>,
+    five_minute_alerted: Rc<Cell<bool>>,
     active_todo: Rc<RefCell<String>>,
     store: Rc<Store>,
 ) {
@@ -451,13 +512,16 @@ fn wire_timer(
         let active_todo = active_todo.clone();
         let weak_pet = pet.as_weak();
         let store = store.clone();
+        let five_minute_alerted = five_minute_alerted.clone();
         window.on_start(move || {
             let mut state = state.borrow_mut();
             state.running = true;
             state.paused = false;
+            five_minute_alerted.set(false);
             let _ = store.save_pomodoro(&state);
             if let Some(window) = weak.upgrade() {
                 update_timer_view(&window, &state, &active_todo.borrow());
+                let _ = window.hide();
             }
             if let Some(pet) = weak_pet.upgrade() {
                 pet.set_frame_index(1);
@@ -482,8 +546,10 @@ fn wire_timer(
     }
     {
         let weak = window.as_weak();
+        let five_minute_alerted = five_minute_alerted.clone();
         window.on_stop(move || {
             *state.borrow_mut() = PomodoroState::default();
+            five_minute_alerted.set(false);
             let _ = store.save_pomodoro(&state.borrow());
             active_todo.borrow_mut().clear();
             if let Some(window) = weak.upgrade() {
@@ -681,6 +747,51 @@ fn refresh_todos(window: &TodoWindow, store: &Store, include_completed: bool) {
     window.set_todos(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
 
+fn initialize_todo_datetime_pickers(window: &TodoWindow) {
+    let (dates, times, date_index, time_index) = datetime_picker_values();
+    let mut optional_dates = Vec::with_capacity(dates.len() + 1);
+    optional_dates.push(SharedString::from("不设置截止日期"));
+    optional_dates.extend(dates);
+    window.set_date_options(ModelRc::from(Rc::new(VecModel::from(optional_dates))));
+    window.set_time_options(ModelRc::from(Rc::new(VecModel::from(times))));
+    window.set_date_index(date_index + 1);
+    window.set_time_index(time_index);
+}
+
+fn initialize_reminder_datetime_pickers(window: &ReminderWindow) {
+    let (dates, times, date_index, time_index) = datetime_picker_values();
+    window.set_date_options(ModelRc::from(Rc::new(VecModel::from(dates))));
+    window.set_time_options(ModelRc::from(Rc::new(VecModel::from(times))));
+    window.set_date_index(date_index);
+    window.set_time_index(time_index);
+}
+
+fn datetime_picker_values() -> (Vec<SharedString>, Vec<SharedString>, i32, i32) {
+    let now = Local::now();
+    let target = now + chrono::Duration::minutes(10);
+    let rounded_slot = target.num_seconds_from_midnight().div_ceil(15 * 60);
+    let rounded_day_offset = i64::from(rounded_slot / (24 * 4));
+    let target_day_offset = (target.date_naive() - now.date_naive()).num_days();
+    let date_index = (target_day_offset + rounded_day_offset).clamp(0, 29) as i32;
+    let time_index = (rounded_slot % (24 * 4)) as i32;
+
+    let dates = (0..30)
+        .map(|day| {
+            (now.date_naive() + chrono::Duration::days(day))
+                .format("%Y-%m-%d")
+                .to_string()
+                .into()
+        })
+        .collect();
+    let times = (0..24 * 4)
+        .map(|slot| {
+            let minutes = slot * 15;
+            format!("{:02}:{:02}", minutes / 60, minutes % 60).into()
+        })
+        .collect();
+    (dates, times, date_index, time_index)
+}
+
 fn parse_local_datetime(date: &str, time: &str) -> Result<Option<chrono::DateTime<Local>>> {
     if date.trim().is_empty() && time.trim().is_empty() {
         return Ok(None);
@@ -743,8 +854,24 @@ fn restore_pet_position(pet: &PetWindow, settings: &AppSettings) {
 }
 
 fn center_window_on_active_monitor(window: &slint::Window, width: u32, height: u32) {
-    let (x, y) = platform::active_work_area().center(width, height);
-    window.set_position(PhysicalPosition::new(x, y));
+    position_window_on_active_monitor(window, width, height, 0, 0);
+}
+
+fn position_window_on_active_monitor(
+    window: &slint::Window,
+    width: u32,
+    height: u32,
+    offset_x: i32,
+    offset_y: i32,
+) {
+    let area = platform::active_work_area();
+    let (x, y) = area.center(width, height);
+    let max_x = (area.right - width as i32).max(area.left);
+    let max_y = (area.bottom - height as i32).max(area.top);
+    window.set_position(PhysicalPosition::new(
+        (x + offset_x).clamp(area.left, max_x),
+        (y + offset_y).clamp(area.top, max_y),
+    ));
 }
 
 fn position_notification(notification: &NotificationWindow, pet: &PetWindow) {
