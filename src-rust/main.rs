@@ -32,6 +32,8 @@ struct PetMotion {
 type AlertPresenter = Rc<dyn Fn(String)>;
 type CancelMotion = Rc<dyn Fn()>;
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() {
     if let Err(error) = run() {
         rfd::MessageDialog::new()
@@ -57,6 +59,7 @@ fn run() -> Result<()> {
     let reminder = ReminderWindow::new()?;
     let timer_window = TimerWindow::new()?;
     let settings_window = SettingsWindow::new()?;
+    settings_window.set_app_version(APP_VERSION.into());
     let package_window = PackageWindow::new()?;
     let notification = NotificationWindow::new()?;
 

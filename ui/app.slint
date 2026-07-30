@@ -334,6 +334,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> reduce-motion-value: false;
     in-out property <int> theme-index: 0;
     in-out property <int> sedentary-minutes: 60;
+    in-out property <string> app-version: "";
     width: 480px; height: 720px; no-frame: true; background: transparent; title: "设置";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
@@ -367,6 +368,7 @@ export component SettingsWindow inherits Window {
                     }
                 }
                 Text { height: 40px; text: "应用完全离线运行，不创建 HTTP 客户端，不收集遥测。"; color: Theme.text-secondary; wrap: word-wrap; }
+                Text { height: 22px; text: "版本 " + root.app-version; color: Theme.text-secondary; }
                 HorizontalLayout {
                     height: 44px;
                     alignment: end;
