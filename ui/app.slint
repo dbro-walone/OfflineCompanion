@@ -16,6 +16,37 @@ export global Theme {
     out property <brush> error: light ? #d92d20 : #ff8888;
 }
 
+component MenuItemRow inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    height: 48px;
+    background: transparent;
+
+    state-layer := Rectangle {
+        x: 4px;
+        y: 4px;
+        width: parent.width - 8px;
+        height: parent.height - 8px;
+        background: item-touch.has-hover || item-touch.pressed ? Theme.panel-hover : transparent;
+        border-radius: 20px;
+    }
+    Text {
+        x: 20px;
+        width: parent.width - 40px;
+        height: parent.height;
+        text: root.text;
+        color: Theme.text-primary;
+        font-size: 14px;
+        horizontal-alignment: left;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    item-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 export struct TodoRow {
     id: string,
     title: string,
@@ -153,22 +184,26 @@ export component PetWindow inherits Window {
         animate opacity { duration: 180ms; }
     }
     if root.menu-visible: Rectangle {
-        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 194px; height: 246px;
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 194px; height: 324px;
         background: Theme.popup-background;
         border-color: Theme.stroke;
         border-width: 1px;
         border-radius: 12px;
-        drop-shadow-blur: 18px;
-        drop-shadow-color: Theme.light ? #3f354930 : #08091280;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 6px;
+        drop-shadow-color: Theme.text-primary.transparentize(0.78);
         VerticalLayout {
-            padding: 8px;
-            spacing: 2px;
-            Button { text: "待办事项"; clicked => { root.menu-visible=false; root.open-todos(); } }
-            Button { text: "定时提醒"; clicked => { root.menu-visible=false; root.open-reminder(); } }
-            Button { text: "番茄钟"; clicked => { root.menu-visible=false; root.open-timer(); } }
-            Button { text: "角色与动作管理"; clicked => { root.menu-visible=false; root.open-packages(); } }
-            Button { text: "设置"; clicked => { root.menu-visible=false; root.open-settings(); } }
-            Button { text: "退出"; clicked => { root.exit(); } }
+            padding-left: 8px;
+            padding-right: 8px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 4px;
+            MenuItemRow { text: "待办事项"; clicked => { root.menu-visible=false; root.open-todos(); } }
+            MenuItemRow { text: "定时提醒"; clicked => { root.menu-visible=false; root.open-reminder(); } }
+            MenuItemRow { text: "番茄钟"; clicked => { root.menu-visible=false; root.open-timer(); } }
+            MenuItemRow { text: "角色与动作管理"; clicked => { root.menu-visible=false; root.open-packages(); } }
+            MenuItemRow { text: "设置"; clicked => { root.menu-visible=false; root.open-settings(); } }
+            MenuItemRow { text: "退出"; clicked => { root.exit(); } }
         }
     }
 }
