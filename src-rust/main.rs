@@ -53,6 +53,7 @@ fn run() -> Result<()> {
     let suppress_next_pet_click = Rc::new(RefCell::new(false));
 
     let pet = PetWindow::new()?;
+    platform::hide_from_taskbar(pet.window());
     let todos = TodoWindow::new()?;
     let reminder = ReminderWindow::new()?;
     let timer_window = TimerWindow::new()?;
@@ -300,6 +301,24 @@ fn run() -> Result<()> {
         let _ = slint::quit_event_loop();
     });
     pet.show()?;
+    let weak_pet = pet.as_weak();
+    let _tray = platform::create_tray(
+        Box::new(move || {
+            let weak_pet = weak_pet.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(pet) = weak_pet.upgrade() {
+                    if pet.window().is_visible() {
+                        let _ = pet.hide();
+                    } else {
+                        let _ = pet.show();
+                    }
+                }
+            });
+        }),
+        Box::new(move || {
+            let _ = slint::quit_event_loop();
+        }),
+    );
     slint::run_event_loop()?;
     Ok(())
 }

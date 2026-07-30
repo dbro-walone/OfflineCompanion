@@ -21,6 +21,238 @@ pub fn focus_window(window: &slint::Window) {
 }
 
 #[cfg(windows)]
+pub fn hide_from_taskbar(window: &slint::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, WS_EX_TOOLWINDOW,
+        },
+    };
+
+    let handle = window.window_handle();
+    let Ok(raw) = handle.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = raw.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(win32.hwnd.get() as *mut std::ffi::c_void);
+    unsafe {
+        let extended_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_EXSTYLE,
+            extended_style | WS_EX_TOOLWINDOW.0 as isize,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+pub fn hide_from_taskbar(_window: &slint::Window) {}
+
+#[cfg(windows)]
+struct TrayCallbacks {
+    on_toggle: Box<dyn Fn()>,
+    on_quit: Box<dyn Fn()>,
+}
+
+#[cfg(windows)]
+pub struct TrayHandle {
+    hwnd: windows::Win32::Foundation::HWND,
+    callbacks: *mut TrayCallbacks,
+}
+
+#[cfg(not(windows))]
+pub struct TrayHandle;
+
+#[cfg(windows)]
+const TRAY_ICON_ID: u32 = 1;
+#[cfg(windows)]
+const TRAY_CALLBACK_MESSAGE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+#[cfg(windows)]
+const TRAY_TOGGLE_COMMAND: usize = 1;
+#[cfg(windows)]
+const TRAY_QUIT_COMMAND: usize = 2;
+
+#[cfg(windows)]
+unsafe extern "system" fn tray_window_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    message: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::{
+        Foundation::{LRESULT, POINT},
+        UI::WindowsAndMessaging::{
+            AppendMenuW, CREATESTRUCTW, CreatePopupMenu, DefWindowProcW, DestroyMenu,
+            GWLP_USERDATA, GetCursorPos, GetWindowLongPtrW, MF_STRING, SetForegroundWindow,
+            SetWindowLongPtrW, TPM_RIGHTBUTTON, TrackPopupMenu, WM_COMMAND, WM_LBUTTONUP,
+            WM_NCCREATE, WM_RBUTTONUP,
+        },
+    };
+    use windows::core::w;
+
+    unsafe {
+        if message == WM_NCCREATE {
+            let create = &*(lparam.0 as *const CREATESTRUCTW);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            return LRESULT(1);
+        }
+
+        let callbacks = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const TrayCallbacks;
+        if callbacks.is_null() {
+            return DefWindowProcW(hwnd, message, wparam, lparam);
+        }
+
+        if message == TRAY_CALLBACK_MESSAGE {
+            match lparam.0 as u32 {
+                WM_LBUTTONUP => ((*callbacks).on_toggle)(),
+                WM_RBUTTONUP => {
+                    if let Ok(menu) = CreatePopupMenu() {
+                        let _ =
+                            AppendMenuW(menu, MF_STRING, TRAY_TOGGLE_COMMAND, w!("显示/隐藏 鸦影"));
+                        let _ = AppendMenuW(menu, MF_STRING, TRAY_QUIT_COMMAND, w!("退出"));
+                        let mut cursor = POINT::default();
+                        if GetCursorPos(&mut cursor).is_ok() {
+                            let _ = SetForegroundWindow(hwnd);
+                            let _ = TrackPopupMenu(
+                                menu,
+                                TPM_RIGHTBUTTON,
+                                cursor.x,
+                                cursor.y,
+                                None,
+                                hwnd,
+                                None,
+                            );
+                        }
+                        let _ = DestroyMenu(menu);
+                    }
+                }
+                _ => {}
+            }
+            return LRESULT(0);
+        }
+
+        if message == WM_COMMAND {
+            match wparam.0 & 0xffff {
+                TRAY_TOGGLE_COMMAND => ((*callbacks).on_toggle)(),
+                TRAY_QUIT_COMMAND => ((*callbacks).on_quit)(),
+                _ => {}
+            }
+            return LRESULT(0);
+        }
+
+        DefWindowProcW(hwnd, message, wparam, lparam)
+    }
+}
+
+#[cfg(windows)]
+pub fn create_tray(on_toggle: Box<dyn Fn()>, on_quit: Box<dyn Fn()>) -> TrayHandle {
+    use windows::Win32::{
+        Foundation::{HINSTANCE, HWND},
+        System::LibraryLoader::GetModuleHandleW,
+        UI::{
+            Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW, Shell_NotifyIconW},
+            WindowsAndMessaging::{
+                CreateWindowExW, HWND_MESSAGE, IDI_APPLICATION, LoadIconW, RegisterClassW,
+                WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
+            },
+        },
+    };
+    use windows::core::w;
+
+    unsafe {
+        let Ok(module) = GetModuleHandleW(None) else {
+            return TrayHandle {
+                hwnd: HWND::default(),
+                callbacks: std::ptr::null_mut(),
+            };
+        };
+        let instance = HINSTANCE(module.0);
+        let class = WNDCLASSW {
+            hInstance: instance,
+            lpszClassName: w!("OfflineCompanionTrayWindow"),
+            lpfnWndProc: Some(tray_window_proc),
+            ..Default::default()
+        };
+        RegisterClassW(&class);
+
+        let callbacks = Box::into_raw(Box::new(TrayCallbacks { on_toggle, on_quit }));
+        let hwnd = match CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            class.lpszClassName,
+            w!("鸦影"),
+            WINDOW_STYLE::default(),
+            0,
+            0,
+            0,
+            0,
+            Some(HWND_MESSAGE),
+            None,
+            Some(instance),
+            Some(callbacks.cast()),
+        ) {
+            Ok(hwnd) => hwnd,
+            Err(_) => {
+                drop(Box::from_raw(callbacks));
+                return TrayHandle {
+                    hwnd: HWND::default(),
+                    callbacks: std::ptr::null_mut(),
+                };
+            }
+        };
+
+        let mut icon_data = NOTIFYICONDATAW {
+            cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: hwnd,
+            uID: TRAY_ICON_ID,
+            uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
+            uCallbackMessage: TRAY_CALLBACK_MESSAGE,
+            hIcon: LoadIconW(None, IDI_APPLICATION).unwrap_or_default(),
+            ..Default::default()
+        };
+        let tooltip = "鸦影".encode_utf16().chain(std::iter::once(0));
+        for (target, value) in icon_data.szTip.iter_mut().zip(tooltip) {
+            *target = value;
+        }
+        let _ = Shell_NotifyIconW(NIM_ADD, &icon_data);
+
+        TrayHandle { hwnd, callbacks }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn create_tray(_on_toggle: Box<dyn Fn()>, _on_quit: Box<dyn Fn()>) -> TrayHandle {
+    TrayHandle
+}
+
+#[cfg(windows)]
+impl Drop for TrayHandle {
+    fn drop(&mut self) {
+        use windows::Win32::UI::{
+            Shell::{NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW},
+            WindowsAndMessaging::DestroyWindow,
+        };
+
+        if self.hwnd.is_invalid() {
+            return;
+        }
+        unsafe {
+            let icon_data = NOTIFYICONDATAW {
+                cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+                hWnd: self.hwnd,
+                uID: TRAY_ICON_ID,
+                ..Default::default()
+            };
+            let _ = Shell_NotifyIconW(NIM_DELETE, &icon_data);
+            let _ = DestroyWindow(self.hwnd);
+            drop(Box::from_raw(self.callbacks));
+        }
+    }
+}
+
+#[cfg(windows)]
 pub fn active_work_area(window: &slint::Window) -> WorkArea {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{
