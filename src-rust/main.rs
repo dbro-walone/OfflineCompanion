@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDateTime, TimeZone, Timelike};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike};
 use model::{AppSettings, PomodoroPhase, PomodoroState};
 use slint::{ComponentHandle, ModelRc, PhysicalPosition, Timer, TimerMode, VecModel};
 use storage::{AppPaths, Store};
@@ -51,6 +51,7 @@ fn run() -> Result<()> {
     let notification_message = Rc::new(RefCell::new(String::new()));
     let pomodoro_five_minute_notified = Rc::new(RefCell::new(false));
     let suppress_next_pet_click = Rc::new(RefCell::new(false));
+    let reminder_base_date = Rc::new(RefCell::new(Local::now().date_naive()));
 
     let pet = PetWindow::new()?;
     let todos = TodoWindow::new()?;
@@ -81,6 +82,7 @@ fn run() -> Result<()> {
         &timer_window,
         &settings_window,
         &package_window,
+        reminder_base_date.clone(),
     );
     wire_todos(
         &todos,
@@ -90,8 +92,8 @@ fn run() -> Result<()> {
         active_todo.clone(),
         pomodoro_five_minute_notified.clone(),
     );
-    configure_reminder_defaults(&reminder);
-    wire_reminders(&reminder, store.clone());
+    *reminder_base_date.borrow_mut() = configure_reminder_defaults(&reminder);
+    wire_reminders(&reminder, store.clone(), reminder_base_date);
     update_timer_view(&timer_window, &pomodoro.borrow(), "");
     wire_timer(
         &timer_window,
@@ -150,6 +152,25 @@ fn run() -> Result<()> {
                 drop(sequence);
                 sequences.borrow_mut().clear();
                 *index.borrow_mut() = 0;
+            }
+        });
+    }
+
+    let idle_action_timer = Timer::default();
+    {
+        let weak_pet = pet.as_weak();
+        let settings = settings.clone();
+        let sequences = animation_sequence.clone();
+        idle_action_timer.start(TimerMode::Repeated, Duration::from_secs(8), move || {
+            let Some(pet) = weak_pet.upgrade() else {
+                return;
+            };
+            if settings.borrow().idle_actions_enabled
+                && platform::idle_millis() >= 10_000
+                && sequences.borrow().is_empty()
+                && !pet.get_menu_visible()
+            {
+                *sequences.borrow_mut() = vec![4, 5, 3];
             }
         });
     }
@@ -311,6 +332,7 @@ fn wire_basic_windows(
     timer: &TimerWindow,
     settings: &SettingsWindow,
     packages: &PackageWindow,
+    reminder_base_date: Rc<RefCell<NaiveDate>>,
 ) {
     macro_rules! open_window {
         ($callback:ident, $window:expr) => {{
@@ -338,7 +360,7 @@ fn wire_basic_windows(
     let weak_pet = pet.as_weak();
     pet.on_open_reminder(move || {
         if let (Some(window), Some(pet)) = (weak.upgrade(), weak_pet.upgrade()) {
-            configure_reminder_defaults(&window);
+            *reminder_base_date.borrow_mut() = configure_reminder_defaults(&window);
             window.invoke_refresh_reminders();
             center_window_on_active_monitor(
                 window.window(),
@@ -480,19 +502,29 @@ fn wire_todos(
     }
 }
 
-fn wire_reminders(window: &ReminderWindow, store: Rc<Store>) {
+fn wire_reminders(
+    window: &ReminderWindow,
+    store: Rc<Store>,
+    reminder_base_date: Rc<RefCell<NaiveDate>>,
+) {
     refresh_reminders(window, &store);
     {
         let weak = window.as_weak();
         let store = store.clone();
+        let reminder_base_date = reminder_base_date.clone();
         window.on_save_reminder(move |title, date_index, hour_index, minute_index| {
             let Some(window) = weak.upgrade() else { return };
-            let result = reminder_datetime(date_index, hour_index, minute_index)
-                .and_then(|value| store.add_reminder(&title, value));
+            let result = reminder_datetime(
+                *reminder_base_date.borrow(),
+                date_index,
+                hour_index,
+                minute_index,
+            )
+            .and_then(|value| store.add_reminder(&title, value));
             match result {
                 Ok(()) => {
                     refresh_reminders(&window, &store);
-                    configure_reminder_defaults(&window);
+                    *reminder_base_date.borrow_mut() = configure_reminder_defaults(&window);
                     window.set_status_text("提醒已添加，可以继续创建".into());
                 }
                 Err(error) => window.set_status_text(error.to_string().into()),
@@ -736,17 +768,7 @@ fn refresh_todos(window: &TodoWindow, store: &Store, include_completed: bool) {
             id: item.id.into(),
             title: item.title.into(),
             completed: item.completed,
-            meta: item
-                .due_at
-                .map(|x| {
-                    format!(
-                        "到期 {} · {} 个番茄",
-                        x.format("%Y-%m-%d %H:%M"),
-                        item.estimated_pomodoros
-                    )
-                })
-                .unwrap_or_else(|| format!("未设置截止时间 · {} 个番茄", item.estimated_pomodoros))
-                .into(),
+            meta: todo_meta_text(item.due_at, item.estimated_pomodoros).into(),
         })
         .collect::<Vec<_>>();
     window.set_todos(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -767,9 +789,12 @@ fn refresh_reminders(window: &ReminderWindow, store: &Store) {
     window.set_reminders(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
 
-fn configure_reminder_defaults(window: &ReminderWindow) {
+fn configure_reminder_defaults(window: &ReminderWindow) -> NaiveDate {
     let now = Local::now();
-    let default_time = now + chrono::Duration::minutes(10);
+    configure_reminder_defaults_at(window, now)
+}
+
+fn configure_reminder_defaults_at(window: &ReminderWindow, now: DateTime<Local>) -> NaiveDate {
     let today = now.date_naive();
     let dates: Vec<slint::SharedString> = (0..31)
         .map(|offset| {
@@ -791,18 +816,16 @@ fn configure_reminder_defaults(window: &ReminderWindow) {
     window.set_date_options(ModelRc::from(Rc::new(VecModel::from(dates))));
     window.set_hour_options(ModelRc::from(Rc::new(VecModel::from(hours))));
     window.set_minute_options(ModelRc::from(Rc::new(VecModel::from(minutes))));
-    window.set_date_index(
-        default_time
-            .date_naive()
-            .signed_duration_since(today)
-            .num_days() as i32,
-    );
-    window.set_hour_index(default_time.hour() as i32);
-    window.set_minute_index(default_time.minute() as i32);
+    let (date_index, hour_index, minute_index) = reminder_default_indices(now);
+    window.set_date_index(date_index);
+    window.set_hour_index(hour_index);
+    window.set_minute_index(minute_index);
     window.set_status_text("".into());
+    today
 }
 
 fn reminder_datetime(
+    base_date: NaiveDate,
     date_index: i32,
     hour_index: i32,
     minute_index: i32,
@@ -810,7 +833,7 @@ fn reminder_datetime(
     anyhow::ensure!((0..31).contains(&date_index), "请选择有效日期");
     anyhow::ensure!((0..24).contains(&hour_index), "请选择有效小时");
     anyhow::ensure!((0..60).contains(&minute_index), "请选择有效分钟");
-    let date = Local::now().date_naive() + chrono::Duration::days(date_index as i64);
+    let date = base_date + chrono::Duration::days(date_index as i64);
     let naive = date
         .and_hms_opt(hour_index as u32, minute_index as u32, 0)
         .context("请选择有效日期和时间")?;
@@ -827,13 +850,15 @@ fn parse_local_datetime(date: &str, time: &str) -> Result<Option<chrono::DateTim
     let raw = format!("{} {}", date.trim(), time.trim());
     let naive =
         NaiveDateTime::parse_from_str(&raw, "%Y-%m-%d %H:%M").context("日期或时间格式无效")?;
-    Ok(Local.from_local_datetime(&naive).single())
+    let value = Local
+        .from_local_datetime(&naive)
+        .single()
+        .context("所选时间在当前时区中无效")?;
+    Ok(Some(value))
 }
 
 fn update_timer_view(window: &TimerWindow, state: &PomodoroState, todo: &str) {
-    let minutes = state.remaining_seconds / 60;
-    let seconds = state.remaining_seconds % 60;
-    window.set_time_text(format!("{minutes:02}:{seconds:02}").into());
+    window.set_time_text(timer_time_text(state.remaining_seconds).into());
     let phase = match (state.phase, state.paused) {
         (_, true) => "已暂停",
         (PomodoroPhase::Focus, false) => "专注",
@@ -843,6 +868,38 @@ fn update_timer_view(window: &TimerWindow, state: &PomodoroState, todo: &str) {
     if !todo.is_empty() {
         window.set_active_todo(todo.into());
     }
+}
+
+fn timer_time_text(remaining_seconds: i64) -> String {
+    let remaining_seconds = remaining_seconds.max(0);
+    let minutes = remaining_seconds / 60;
+    let seconds = remaining_seconds % 60;
+    format!("{minutes:02}:{seconds:02}")
+}
+
+fn todo_meta_text(due_at: Option<DateTime<Local>>, estimated_pomodoros: i32) -> String {
+    due_at.map_or_else(
+        || format!("未设置截止时间 · {estimated_pomodoros} 个番茄"),
+        |due_at| {
+            format!(
+                "到期 {} · {estimated_pomodoros} 个番茄",
+                due_at.format("%Y-%m-%d %H:%M")
+            )
+        },
+    )
+}
+
+fn reminder_default_indices(now: DateTime<Local>) -> (i32, i32, i32) {
+    let default_time = now + chrono::Duration::minutes(10);
+    let date_index = default_time
+        .date_naive()
+        .signed_duration_since(now.date_naive())
+        .num_days() as i32;
+    (
+        date_index,
+        default_time.hour() as i32,
+        default_time.minute() as i32,
+    )
 }
 
 fn apply_settings_to_pet(pet: &PetWindow, settings: &AppSettings) {
@@ -1028,12 +1085,20 @@ mod app_tests {
     use super::*;
 
     #[test]
-    fn combines_simultaneous_reminders_without_losing_titles() {
+    fn formats_empty_reminder_alert() {
         assert_eq!(format_reminder_alert(&[]), None);
+    }
+
+    #[test]
+    fn formats_single_reminder_alert() {
         assert_eq!(
             format_reminder_alert(&["喝水".into()]),
             Some("时间到了：喝水".into())
         );
+    }
+
+    #[test]
+    fn formats_multiple_reminder_alerts_without_losing_titles() {
         let combined = format_reminder_alert(&["开会".into(), "提交报告".into()]).unwrap();
         assert!(combined.contains("2 个提醒"));
         assert!(combined.contains("• 开会"));
@@ -1050,5 +1115,123 @@ mod app_tests {
             .map(|step| smoothstep(step as f32 / 10.0))
             .collect::<Vec<_>>();
         assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+
+    #[test]
+    fn builds_valid_reminder_datetime() {
+        let base_date = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
+        let value = reminder_datetime(base_date, 0, 9, 5).unwrap();
+        assert_eq!(value.date_naive(), base_date);
+        assert_eq!((value.hour(), value.minute()), (9, 5));
+    }
+
+    #[test]
+    fn builds_reminder_datetime_across_day_boundary() {
+        let base_date = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let value = reminder_datetime(base_date, 1, 0, 0).unwrap();
+        assert_eq!(
+            value.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_range_reminder_indices() {
+        let base_date = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
+        for indices in [
+            (-1, 0, 0),
+            (31, 0, 0),
+            (0, -1, 0),
+            (0, 24, 0),
+            (0, 0, -1),
+            (0, 0, 60),
+        ] {
+            assert!(reminder_datetime(base_date, indices.0, indices.1, indices.2).is_err());
+        }
+    }
+
+    #[test]
+    fn parses_empty_local_datetime_as_none() {
+        assert!(parse_local_datetime("  ", "").unwrap().is_none());
+    }
+
+    #[test]
+    fn rejects_incomplete_or_malformed_local_datetime() {
+        for (date, time) in [
+            ("2026-01-01", ""),
+            ("", "12:00"),
+            ("2026-02-30", "12:00"),
+            ("not-a-date", "12:00"),
+        ] {
+            assert!(parse_local_datetime(date, time).is_err());
+        }
+    }
+
+    #[test]
+    fn parses_valid_local_datetime() {
+        let value = parse_local_datetime("2026-01-15", "09:05")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            value.naive_local(),
+            NaiveDate::from_ymd_opt(2026, 1, 15)
+                .unwrap()
+                .and_hms_opt(9, 5, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn formats_timer_time_and_clamps_negative_values() {
+        assert_eq!(timer_time_text(25 * 60), "25:00");
+        assert_eq!(timer_time_text(5 * 60 + 9), "05:09");
+        assert_eq!(timer_time_text(0), "00:00");
+        assert_eq!(timer_time_text(-1), "00:00");
+    }
+
+    #[test]
+    fn formats_todo_meta_with_and_without_due_time() {
+        assert_eq!(todo_meta_text(None, 3), "未设置截止时间 · 3 个番茄");
+        let due_at = Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(2026, 1, 15)
+                    .unwrap()
+                    .and_hms_opt(9, 5, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap();
+        assert_eq!(
+            todo_meta_text(Some(due_at), 2),
+            "到期 2026-01-15 09:05 · 2 个番茄"
+        );
+    }
+
+    #[test]
+    fn calculates_default_reminder_indices_for_same_day() {
+        let now = Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(2026, 1, 15)
+                    .unwrap()
+                    .and_hms_opt(12, 34, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap();
+        assert_eq!(reminder_default_indices(now), (0, 12, 44));
+    }
+
+    #[test]
+    fn calculates_default_reminder_indices_across_midnight() {
+        let now = Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(2026, 1, 31)
+                    .unwrap()
+                    .and_hms_opt(23, 55, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap();
+        assert_eq!(reminder_default_indices(now), (1, 0, 5));
     }
 }
