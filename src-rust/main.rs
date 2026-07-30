@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod animation;
 mod model;
 mod packages;
 mod platform;
@@ -11,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use animation::{AnimationDef, sample};
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveDateTime, TimeZone, Timelike};
 use model::{AppSettings, PomodoroPhase, PomodoroState};
@@ -18,6 +20,29 @@ use slint::{ComponentHandle, ModelRc, PhysicalPosition, Timer, TimerMode, VecMod
 use storage::{AppPaths, Store};
 
 slint::include_modules!();
+
+const IDLE_JSON: &str =
+    include_str!("../packages/characters/shadow-crow-ninja/animations/idle.json");
+const FOCUS_JSON: &str =
+    include_str!("../packages/characters/shadow-crow-ninja/animations/focus.json");
+const RELAX_JSON: &str =
+    include_str!("../packages/characters/shadow-crow-ninja/animations/relax.json");
+const CLICKED_JSON: &str =
+    include_str!("../packages/characters/shadow-crow-ninja/animations/clicked.json");
+const CELEBRATE_JSON: &str =
+    include_str!("../packages/characters/shadow-crow-ninja/animations/celebrate.json");
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BaseAnim {
+    Idle,
+    Focus,
+    Relax,
+}
+
+struct Overlay {
+    def: AnimationDef,
+    started_at: Instant,
+}
 
 struct PetMotion {
     start_x: i32,
@@ -31,6 +56,18 @@ struct PetMotion {
 
 type AlertPresenter = Rc<dyn Fn(String)>;
 type CancelMotion = Rc<dyn Fn()>;
+type OverlayTrigger = Rc<dyn Fn(&'static str)>;
+
+fn load_anim(json: &'static str) -> AnimationDef {
+    serde_json::from_str(json).expect("内嵌动画 JSON 必须有效")
+}
+
+fn base_anim_for_phase(phase: PomodoroPhase) -> BaseAnim {
+    match phase {
+        PomodoroPhase::Focus => BaseAnim::Focus,
+        PomodoroPhase::ShortBreak => BaseAnim::Relax,
+    }
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -93,13 +130,26 @@ fn run() -> Result<()> {
     configure_reminder_defaults(&reminder);
     wire_reminders(&reminder, store.clone());
     update_timer_view(&timer_window, &pomodoro.borrow(), "");
+    let idle_def = Rc::new(load_anim(IDLE_JSON));
+    let focus_def = Rc::new(load_anim(FOCUS_JSON));
+    let relax_def = Rc::new(load_anim(RELAX_JSON));
+    let initial_base_anim = if pomodoro.borrow().running {
+        base_anim_for_phase(pomodoro.borrow().phase)
+    } else {
+        BaseAnim::Idle
+    };
+    let base_anim = Rc::new(RefCell::new(initial_base_anim));
+    let overlay = Rc::new(RefCell::new(None::<Overlay>));
+    let motion_active = Rc::new(RefCell::new(false));
+    let idle_anchor = Rc::new(RefCell::new(Instant::now()));
     wire_timer(
         &timer_window,
-        &pet,
         pomodoro.clone(),
         active_todo.clone(),
         store.clone(),
         pomodoro_five_minute_notified.clone(),
+        base_anim.clone(),
+        idle_anchor.clone(),
     );
     wire_settings(
         &settings_window,
@@ -114,43 +164,68 @@ fn run() -> Result<()> {
     );
     wire_packages(&package_window, paths.clone());
     wire_notification(&notification, notification_message.clone(), store.clone());
-    let animation_sequence = Rc::new(RefCell::new(Vec::<i32>::new()));
-    let animation_index = Rc::new(RefCell::new(0usize));
+    let trigger_overlay: OverlayTrigger = {
+        let overlay = overlay.clone();
+        let anchor = idle_anchor.clone();
+        Rc::new(move |json: &'static str| {
+            let now = Instant::now();
+            *anchor.borrow_mut() = now;
+            *overlay.borrow_mut() = Some(Overlay {
+                def: load_anim(json),
+                started_at: now,
+            });
+        })
+    };
     {
-        let sequences = animation_sequence.clone();
-        let index = animation_index.clone();
+        let trigger_overlay = trigger_overlay.clone();
         let suppress_next_pet_click = suppress_next_pet_click.clone();
         pet.on_pet_clicked(move || {
             if std::mem::take(&mut *suppress_next_pet_click.borrow_mut()) {
                 return;
             }
-            *sequences.borrow_mut() = vec![4, 5, 3];
-            *index.borrow_mut() = 0;
+            trigger_overlay(CLICKED_JSON);
         });
     }
 
     let animation_timer = Timer::default();
     {
         let weak_pet = pet.as_weak();
-        let sequences = animation_sequence.clone();
-        let index = animation_index.clone();
-        animation_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
+        let idle_def = idle_def.clone();
+        let focus_def = focus_def.clone();
+        let relax_def = relax_def.clone();
+        let base_anim = base_anim.clone();
+        let overlay = overlay.clone();
+        let motion_active = motion_active.clone();
+        let idle_anchor = idle_anchor.clone();
+        animation_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
-            let sequence = sequences.borrow();
-            if sequence.is_empty() {
+            if *motion_active.borrow() {
                 return;
             }
-            let mut position = index.borrow_mut();
-            pet.set_frame_index(sequence[*position]);
-            *position += 1;
-            if *position >= sequence.len() {
-                drop(position);
-                drop(sequence);
-                sequences.borrow_mut().clear();
-                *index.borrow_mut() = 0;
+            let now = Instant::now();
+            let overlay_sample = overlay.borrow().as_ref().map(|active| {
+                sample(
+                    &active.def,
+                    now.saturating_duration_since(active.started_at),
+                )
+            });
+            if let Some((frame, done)) = overlay_sample {
+                pet.set_frame_index(frame);
+                if done {
+                    *overlay.borrow_mut() = None;
+                }
+                return;
             }
+            let base = match *base_anim.borrow() {
+                BaseAnim::Idle => &*idle_def,
+                BaseAnim::Focus => &*focus_def,
+                BaseAnim::Relax => &*relax_def,
+            };
+            let elapsed = now.saturating_duration_since(*idle_anchor.borrow());
+            let (frame, _) = sample(base, elapsed);
+            pet.set_frame_index(frame);
         });
     }
 
@@ -159,7 +234,9 @@ fn run() -> Result<()> {
         &notification,
         settings.clone(),
         notification_message.clone(),
-        animation_sequence.clone(),
+        overlay.clone(),
+        trigger_overlay,
+        motion_active.clone(),
     );
     wire_pet_drag(
         &pet,
@@ -201,9 +278,20 @@ fn run() -> Result<()> {
         let weak_timer = timer_window.as_weak();
         let five_minute_notified = pomodoro_five_minute_notified.clone();
         let present_alert = present_alert.clone();
+        let base_anim = base_anim.clone();
+        let idle_anchor = idle_anchor.clone();
         pomodoro_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
             let mut state = state.borrow_mut();
-            if !state.running || state.paused {
+            if !state.running {
+                return;
+            }
+            let desired_base_anim = base_anim_for_phase(state.phase);
+            let current_base_anim = *base_anim.borrow();
+            if current_base_anim != desired_base_anim {
+                *base_anim.borrow_mut() = desired_base_anim;
+                *idle_anchor.borrow_mut() = Instant::now();
+            }
+            if state.paused {
                 return;
             }
             state.remaining_seconds = state.remaining_seconds.saturating_sub(1);
@@ -238,6 +326,8 @@ fn run() -> Result<()> {
             } else {
                 5 * 60
             };
+            *base_anim.borrow_mut() = base_anim_for_phase(state.phase);
+            *idle_anchor.borrow_mut() = Instant::now();
             *five_minute_notified.borrow_mut() = false;
             let _ = store.save_pomodoro(&state);
             present_alert(text.into());
@@ -525,31 +615,32 @@ fn wire_reminders(window: &ReminderWindow, store: Rc<Store>) {
 
 fn wire_timer(
     window: &TimerWindow,
-    pet: &PetWindow,
     state: Rc<RefCell<PomodoroState>>,
     active_todo: Rc<RefCell<String>>,
     store: Rc<Store>,
     five_minute_notified: Rc<RefCell<bool>>,
+    base_anim: Rc<RefCell<BaseAnim>>,
+    idle_anchor: Rc<RefCell<Instant>>,
 ) {
     {
         let weak = window.as_weak();
         let state = state.clone();
         let active_todo = active_todo.clone();
-        let weak_pet = pet.as_weak();
         let store = store.clone();
         let five_minute_notified = five_minute_notified.clone();
+        let base_anim = base_anim.clone();
+        let idle_anchor = idle_anchor.clone();
         window.on_start(move || {
             *five_minute_notified.borrow_mut() = false;
             let mut state = state.borrow_mut();
             state.running = true;
             state.paused = false;
+            *base_anim.borrow_mut() = base_anim_for_phase(state.phase);
+            *idle_anchor.borrow_mut() = Instant::now();
             let _ = store.save_pomodoro(&state);
             if let Some(window) = weak.upgrade() {
                 update_timer_view(&window, &state, &active_todo.borrow());
                 let _ = window.hide();
-            }
-            if let Some(pet) = weak_pet.upgrade() {
-                pet.set_frame_index(1);
             }
         });
     }
@@ -572,9 +663,12 @@ fn wire_timer(
     {
         let weak = window.as_weak();
         let five_minute_notified = five_minute_notified.clone();
+        let base_anim = base_anim.clone();
         window.on_stop(move || {
             *five_minute_notified.borrow_mut() = false;
             *state.borrow_mut() = PomodoroState::default();
+            *base_anim.borrow_mut() = BaseAnim::Idle;
+            *idle_anchor.borrow_mut() = Instant::now();
             let _ = store.save_pomodoro(&state.borrow());
             active_todo.borrow_mut().clear();
             if let Some(window) = weak.upgrade() {
@@ -917,7 +1011,9 @@ fn create_alert_presenter(
     notification: &NotificationWindow,
     settings: Rc<RefCell<AppSettings>>,
     notification_message: Rc<RefCell<String>>,
-    animation_sequence: Rc<RefCell<Vec<i32>>>,
+    overlay: Rc<RefCell<Option<Overlay>>>,
+    trigger_overlay: OverlayTrigger,
+    motion_active: Rc<RefCell<bool>>,
 ) -> (AlertPresenter, CancelMotion) {
     let motion = Rc::new(RefCell::new(None::<PetMotion>));
     let motion_timer = Rc::new(Timer::default());
@@ -927,7 +1023,8 @@ fn create_alert_presenter(
         let motion = motion.clone();
         let weak_timer = Rc::downgrade(&motion_timer);
         let notification_message = notification_message.clone();
-        let animation_sequence = animation_sequence.clone();
+        let trigger_overlay = trigger_overlay.clone();
+        let motion_active = motion_active.clone();
         motion_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
             let (x, y, walking_frame, completed, text) = {
                 let motion = motion.borrow();
@@ -958,8 +1055,9 @@ fn create_alert_presenter(
             if let Some(timer) = weak_timer.upgrade() {
                 timer.stop();
             }
+            *motion_active.borrow_mut() = false;
             *notification_message.borrow_mut() = text.clone();
-            *animation_sequence.borrow_mut() = vec![6, 6, 6, 3];
+            trigger_overlay(CELEBRATE_JSON);
             if let Some(notification) = weak_notification.upgrade() {
                 notification.set_message(text.into());
                 position_notification(&notification, &pet);
@@ -973,6 +1071,7 @@ fn create_alert_presenter(
     let weak_notification = notification.as_weak();
     let presenter_motion = motion.clone();
     let presenter_timer = motion_timer.clone();
+    let presenter_motion_active = motion_active.clone();
     let presenter = Rc::new(move |text: String| {
         let Some(pet) = weak_pet.upgrade() else {
             return;
@@ -980,7 +1079,8 @@ fn create_alert_presenter(
         if let Some(notification) = weak_notification.upgrade() {
             let _ = notification.hide();
         }
-        animation_sequence.borrow_mut().clear();
+        *overlay.borrow_mut() = None;
+        *presenter_motion_active.borrow_mut() = true;
         pet.set_frame_index(0);
         let start = pet.window().position();
         let (target_x, target_y) = platform::active_work_area(pet.window())
@@ -1006,6 +1106,7 @@ fn create_alert_presenter(
     let cancel = Rc::new(move || {
         motion.borrow_mut().take();
         motion_timer.stop();
+        *motion_active.borrow_mut() = false;
     });
     (presenter, cancel)
 }
