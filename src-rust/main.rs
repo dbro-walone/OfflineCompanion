@@ -59,10 +59,12 @@ fn run() -> Result<()> {
     let settings_window = SettingsWindow::new()?;
     let package_window = PackageWindow::new()?;
     let notification = NotificationWindow::new()?;
+    let menu = MenuWindow::new()?;
 
     apply_theme(
         settings.borrow().theme == "light",
         &pet,
+        &menu,
         &todos,
         &reminder,
         &timer_window,
@@ -76,6 +78,7 @@ fn run() -> Result<()> {
 
     wire_basic_windows(
         &pet,
+        &menu,
         &todos,
         &reminder,
         &timer_window,
@@ -108,6 +111,7 @@ fn run() -> Result<()> {
         &reminder,
         &timer_window,
         &package_window,
+        &menu,
         &notification,
         settings.clone(),
         paths.clone(),
@@ -266,19 +270,14 @@ fn run() -> Result<()> {
         });
     }
 
+    wire_menu(&menu, &pet);
     let menu_dismiss_timer = Timer::default();
     {
-        let weak_pet = pet.as_weak();
-        pet.on_request_menu_focus(move || {
-            if let Some(pet) = weak_pet.upgrade() {
-                platform::focus_window(pet.window());
-            }
-        });
-
+        let weak_menu = menu.as_weak();
         let weak_pet = pet.as_weak();
         let menu_was_visible = Rc::new(RefCell::new(false));
         menu_dismiss_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
-            let Some(pet) = weak_pet.upgrade() else {
+            let (Some(menu), Some(pet)) = (weak_menu.upgrade(), weak_pet.upgrade()) else {
                 return;
             };
             if !pet.get_menu_visible() {
@@ -289,14 +288,20 @@ fn run() -> Result<()> {
                 *menu_was_visible.borrow_mut() = true;
                 return;
             }
-            if !platform::window_has_focus(pet.window()) {
-                pet.set_menu_visible(false);
-                *menu_was_visible.borrow_mut() = false;
+            if platform::window_has_focus(menu.window()) {
+                return;
             }
+            pet.set_menu_visible(false);
+            *menu_was_visible.borrow_mut() = false;
+            let _ = menu.hide();
         });
     }
 
-    pet.on_exit(|| {
+    let weak_menu = menu.as_weak();
+    pet.on_exit(move || {
+        if let Some(menu) = weak_menu.upgrade() {
+            let _ = menu.hide();
+        }
         let _ = slint::quit_event_loop();
     });
     pet.show()?;
@@ -306,6 +311,7 @@ fn run() -> Result<()> {
 
 fn wire_basic_windows(
     pet: &PetWindow,
+    menu: &MenuWindow,
     todos: &TodoWindow,
     reminder: &ReminderWindow,
     timer: &TimerWindow,
@@ -396,6 +402,66 @@ fn wire_basic_windows(
     enable_native_drag!(timer);
     enable_native_drag!(settings);
     enable_native_drag!(packages);
+
+    macro_rules! forward_menu_action {
+        ($menu_callback:ident, $pet_callback:ident) => {{
+            let weak_menu = menu.as_weak();
+            let weak_pet = pet.as_weak();
+            menu.$menu_callback(move || {
+                if let Some(menu) = weak_menu.upgrade() {
+                    let _ = menu.hide();
+                }
+                if let Some(pet) = weak_pet.upgrade() {
+                    pet.set_menu_visible(false);
+                    pet.$pet_callback();
+                }
+            });
+        }};
+    }
+    forward_menu_action!(on_open_todos, invoke_open_todos);
+    forward_menu_action!(on_open_reminder, invoke_open_reminder);
+    forward_menu_action!(on_open_timer, invoke_open_timer);
+    forward_menu_action!(on_open_packages, invoke_open_packages);
+    forward_menu_action!(on_open_settings, invoke_open_settings);
+}
+
+fn wire_menu(menu: &MenuWindow, pet: &PetWindow) {
+    let weak_menu = menu.as_weak();
+    let weak_pet = pet.as_weak();
+    pet.on_open_menu(move || {
+        if let (Some(menu), Some(pet)) = (weak_menu.upgrade(), weak_pet.upgrade()) {
+            position_menu(&menu, &pet);
+            if menu.show().is_ok() {
+                platform::focus_window(menu.window());
+            }
+        }
+    });
+
+    let weak_menu = menu.as_weak();
+    pet.on_dismiss_menu(move || {
+        if let Some(menu) = weak_menu.upgrade() {
+            let _ = menu.hide();
+        }
+    });
+
+    let weak_menu = menu.as_weak();
+    let weak_pet = pet.as_weak();
+    menu.on_dismiss_menu(move || {
+        if let Some(menu) = weak_menu.upgrade() {
+            let _ = menu.hide();
+        }
+        if let Some(pet) = weak_pet.upgrade() {
+            pet.set_menu_visible(false);
+        }
+    });
+
+    let weak_pet = pet.as_weak();
+    menu.on_exit(move || {
+        if let Some(pet) = weak_pet.upgrade() {
+            pet.set_menu_visible(false);
+            pet.invoke_exit();
+        }
+    });
 }
 
 fn wire_todos(
@@ -593,6 +659,7 @@ fn wire_settings(
     reminder: &ReminderWindow,
     timer: &TimerWindow,
     packages: &PackageWindow,
+    menu: &MenuWindow,
     notification: &NotificationWindow,
     settings: Rc<RefCell<AppSettings>>,
     paths: Rc<AppPaths>,
@@ -610,6 +677,7 @@ fn wire_settings(
     let weak_reminder = reminder.as_weak();
     let weak_timer = timer.as_weak();
     let weak_packages = packages.as_weak();
+    let weak_menu = menu.as_weak();
     let weak_notification = notification.as_weak();
     window.on_save(
         move |scale, topmost, idle, reduce_motion, theme_index, sedentary| {
@@ -635,6 +703,9 @@ fn wire_settings(
                 component.global::<Theme>().set_light(theme_index == 1);
             }
             if let Some(component) = weak_packages.upgrade() {
+                component.global::<Theme>().set_light(theme_index == 1);
+            }
+            if let Some(component) = weak_menu.upgrade() {
                 component.global::<Theme>().set_light(theme_index == 1);
             }
             if let Some(component) = weak_notification.upgrade() {
@@ -855,6 +926,7 @@ fn apply_settings_to_pet(pet: &PetWindow, settings: &AppSettings) {
 fn apply_theme(
     light: bool,
     pet: &PetWindow,
+    menu: &MenuWindow,
     todos: &TodoWindow,
     reminder: &ReminderWindow,
     timer: &TimerWindow,
@@ -863,6 +935,7 @@ fn apply_theme(
     notification: &NotificationWindow,
 ) {
     pet.global::<Theme>().set_light(light);
+    menu.global::<Theme>().set_light(light);
     todos.global::<Theme>().set_light(light);
     reminder.global::<Theme>().set_light(light);
     timer.global::<Theme>().set_light(light);
@@ -1021,6 +1094,28 @@ fn position_notification(notification: &NotificationWindow, pet: &PetWindow) {
     notification
         .window()
         .set_position(PhysicalPosition::new(x, y));
+}
+
+fn position_menu(menu: &MenuWindow, pet: &PetWindow) {
+    let pet_position = pet.window().position();
+    let pet_size = pet.window().size();
+    let area = platform::active_work_area(pet.window());
+    let width = menu.window().size().width as i32;
+    let height = menu.window().size().height as i32;
+    let max_x = (area.right - width).max(area.left);
+    let max_y = (area.bottom - height).max(area.top);
+    let centered_x = pet_position.x + (pet_size.width as i32 - width) / 2;
+    let x = centered_x.clamp(area.left, max_x);
+    let below = pet_position.y + pet_size.height as i32 + 8;
+    let above = pet_position.y - height - 8;
+    let y = if below <= max_y {
+        below
+    } else if above >= area.top {
+        above
+    } else {
+        (pet_position.y + (pet_size.height as i32 - height) / 2).clamp(area.top, max_y)
+    };
+    menu.window().set_position(PhysicalPosition::new(x, y));
 }
 
 #[cfg(test)]

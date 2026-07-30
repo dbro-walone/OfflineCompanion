@@ -99,7 +99,8 @@ export component PetWindow inherits Window {
     callback drag-start(length, length);
     callback drag-move(length, length);
     callback drag-end();
-    callback request-menu-focus();
+    callback open-menu();
+    callback dismiss-menu();
     in-out property <int> frame-index: 0;
     in property <bool> reduce-motion: false;
     in property <bool> topmost-enabled: true;
@@ -131,11 +132,17 @@ export component PetWindow inherits Window {
         mouse-cursor: pointer;
         pointer-event(event) => {
             if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
-                root.request-menu-focus();
-                root.menu-visible = !root.menu-visible;
+                if (root.menu-visible) {
+                    root.menu-visible = false;
+                    root.dismiss-menu();
+                } else {
+                    root.menu-visible = true;
+                    root.open-menu();
+                }
             }
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                 root.menu-visible = false;
+                root.dismiss-menu();
                 root.drag-start(self.mouse-x, self.mouse-y);
             }
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
@@ -152,8 +159,31 @@ export component PetWindow inherits Window {
         Text { text: "🛡"; font-size: 42px; horizontal-alignment: center; vertical-alignment: center; }
         animate opacity { duration: 180ms; }
     }
-    if root.menu-visible: Rectangle {
-        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 194px; height: 246px;
+}
+
+export component MenuWindow inherits Window {
+    callback open-todos();
+    callback open-reminder();
+    callback open-timer();
+    callback open-packages();
+    callback open-settings();
+    callback exit();
+    callback dismiss-menu();
+    width: 200px;
+    height: 264px;
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    title: "菜单";
+
+    TouchArea {
+        clicked => { root.dismiss-menu(); }
+    }
+    Rectangle {
+        x: 3px;
+        y: 3px;
+        width: parent.width - 6px;
+        height: parent.height - 6px;
         background: Theme.popup-background;
         border-color: Theme.stroke;
         border-width: 1px;
@@ -163,11 +193,11 @@ export component PetWindow inherits Window {
         VerticalLayout {
             padding: 8px;
             spacing: 2px;
-            Button { text: "待办事项"; clicked => { root.menu-visible=false; root.open-todos(); } }
-            Button { text: "定时提醒"; clicked => { root.menu-visible=false; root.open-reminder(); } }
-            Button { text: "番茄钟"; clicked => { root.menu-visible=false; root.open-timer(); } }
-            Button { text: "角色与动作管理"; clicked => { root.menu-visible=false; root.open-packages(); } }
-            Button { text: "设置"; clicked => { root.menu-visible=false; root.open-settings(); } }
+            Button { text: "待办事项"; clicked => { root.open-todos(); } }
+            Button { text: "定时提醒"; clicked => { root.open-reminder(); } }
+            Button { text: "番茄钟"; clicked => { root.open-timer(); } }
+            Button { text: "角色与动作管理"; clicked => { root.open-packages(); } }
+            Button { text: "设置"; clicked => { root.open-settings(); } }
             Button { text: "退出"; clicked => { root.exit(); } }
         }
     }
