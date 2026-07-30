@@ -325,6 +325,7 @@ fn wire_basic_windows(
                         window.window().size().height,
                     );
                     let _ = window.show();
+                    platform::focus_window(window.window());
                 }
             });
         }};
@@ -347,6 +348,7 @@ fn wire_basic_windows(
                 window.window().size().height,
             );
             let _ = window.show();
+            platform::focus_window(window.window());
         }
     });
 
