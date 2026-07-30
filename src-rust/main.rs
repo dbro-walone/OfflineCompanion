@@ -252,13 +252,7 @@ fn run() -> Result<()> {
         });
     }
 
-    let exit_handler = create_exit_handler(
-        &pet,
-        &notification,
-        settings.clone(),
-        paths.clone(),
-        animation_player.clone(),
-    );
+    let exit_handler = create_exit_handler(&pet, &notification, animation_player.clone());
     {
         let exit_handler = exit_handler.clone();
         pet.on_exit(move || exit_handler());
@@ -282,20 +276,16 @@ fn run() -> Result<()> {
         .map_err(anyhow::Error::msg)?;
     tray.set_tooltip("鸦影");
     tray.show_icon(true);
-    let toggle_pet = {
+    let show_pet = {
         let weak_pet = pet.as_weak();
         move || {
             if let Some(pet) = weak_pet.upgrade() {
-                if platform::window_is_visible(pet.window()) {
-                    let _ = pet.hide();
-                } else {
-                    let _ = pet.show();
-                    platform::focus_window(pet.window());
-                }
+                let _ = pet.show();
+                platform::focus_window(pet.window());
             }
         }
     };
-    tray.on_clicked(toggle_pet);
+    tray.on_clicked(show_pet);
     let weak_pet = pet.as_weak();
     tray.on_menu_action(move |action| match action {
         platform::TrayMenuAction::Show => {
@@ -1265,23 +1255,12 @@ fn position_notification(notification: &NotificationWindow, pet: &PetWindow) {
 fn create_exit_handler(
     pet: &PetWindow,
     notification: &NotificationWindow,
-    settings: Rc<RefCell<AppSettings>>,
-    paths: Rc<AppPaths>,
     animation_player: animations::AnimationPlayer,
 ) -> ExitHandler {
     let weak_pet = pet.as_weak();
     let weak_notification = notification.as_weak();
     let exit_timer = Rc::new(Timer::default());
     Rc::new(move || {
-        if settings.borrow().has_seen_exit_cry {
-            let _ = slint::quit_event_loop();
-            return;
-        }
-        {
-            let mut value = settings.borrow_mut();
-            value.has_seen_exit_cry = true;
-            let _ = storage::save_settings(&paths.settings, &value);
-        }
         if let Some(pet) = weak_pet.upgrade() {
             let _ = pet.show();
             platform::focus_window(pet.window());

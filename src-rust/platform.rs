@@ -251,15 +251,6 @@ pub const fn tray_supported() -> bool {
     cfg!(windows)
 }
 
-pub fn window_is_visible(window: &slint::Window) -> bool {
-    use slint::winit_030::WinitWindowAccessor;
-
-    window
-        .with_winit_window(|window| window.is_visible())
-        .flatten()
-        .unwrap_or(true)
-}
-
 #[cfg(windows)]
 pub fn active_work_area(window: &slint::Window) -> WorkArea {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};

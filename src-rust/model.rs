@@ -33,7 +33,6 @@ pub struct AppSettings {
     pub theme: String,
     #[serde(rename = "sedentaryThresholdMinutes", alias = "sedentaryMinutes")]
     pub sedentary_minutes: u32,
-    pub has_seen_exit_cry: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -49,7 +48,6 @@ impl Default for AppSettings {
             reduce_motion: false,
             theme: "dark".into(),
             sedentary_minutes: 60,
-            has_seen_exit_cry: false,
             extra: BTreeMap::new(),
         }
     }
@@ -94,13 +92,5 @@ mod tests {
         let saved = serde_json::to_value(settings).unwrap();
         assert_eq!(saved["currentCharacterId"], "character.custom");
         assert_eq!(saved["schemaVersion"], 1);
-    }
-
-    #[test]
-    fn exit_cry_setting_is_backward_compatible_and_camel_case() {
-        let settings: AppSettings = serde_json::from_str("{}").unwrap();
-        assert!(!settings.has_seen_exit_cry);
-        let saved = serde_json::to_value(settings).unwrap();
-        assert_eq!(saved["hasSeenExitCry"], false);
     }
 }
