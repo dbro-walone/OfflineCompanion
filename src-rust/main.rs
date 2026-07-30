@@ -19,13 +19,25 @@ use storage::{AppPaths, Store};
 
 slint::include_modules!();
 
+#[derive(Clone, Copy)]
+enum PetMotionKind {
+    SlideToCenter,
+    Hop,
+    SlideHome,
+}
+
 struct PetMotion {
+    kind: PetMotionKind,
     start_x: i32,
     start_y: i32,
     target_x: i32,
     target_y: i32,
+    home_x: i32,
+    home_y: i32,
     started_at: Instant,
     duration: Duration,
+    slide_duration: Duration,
+    reduce_motion: bool,
     message: String,
 }
 
@@ -929,41 +941,99 @@ fn create_alert_presenter(
         let notification_message = notification_message.clone();
         let animation_sequence = animation_sequence.clone();
         motion_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
-            let (x, y, walking_frame, completed, text) = {
-                let motion = motion.borrow();
-                let Some(state) = motion.as_ref() else { return };
-                let elapsed = state.started_at.elapsed();
-                let progress = (elapsed.as_secs_f32() / state.duration.as_secs_f32()).min(1.0);
-                let eased = smoothstep(progress);
-                let x = state.start_x
-                    + ((state.target_x - state.start_x) as f32 * eased).round() as i32;
-                let y = state.start_y
-                    + ((state.target_y - state.start_y) as f32 * eased).round() as i32;
-                let walking_frame = if (elapsed.as_millis() / 160).is_multiple_of(2) {
-                    0
-                } else {
-                    2
-                };
-                (x, y, walking_frame, progress >= 1.0, state.message.clone())
-            };
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
+            let mut show_notification = None;
+            let mut finished = false;
+            let (x, y, frame) = {
+                let mut motion = motion.borrow_mut();
+                let Some(state) = motion.as_mut() else {
+                    return;
+                };
+                let elapsed = state.started_at.elapsed();
+                let progress = (elapsed.as_secs_f32() / state.duration.as_secs_f32()).min(1.0);
+                match state.kind {
+                    PetMotionKind::SlideToCenter => {
+                        let eased = smoothstep(progress);
+                        let x = state.start_x
+                            + ((state.target_x - state.start_x) as f32 * eased).round() as i32;
+                        let y = state.start_y
+                            + ((state.target_y - state.start_y) as f32 * eased).round() as i32;
+                        let frame = if (elapsed.as_millis() / 160).is_multiple_of(2) {
+                            0
+                        } else {
+                            2
+                        };
+                        if progress >= 1.0 {
+                            show_notification = Some(state.message.clone());
+                            state.start_x = state.target_x;
+                            state.start_y = state.target_y;
+                            state.started_at = Instant::now();
+                            if state.reduce_motion {
+                                state.kind = PetMotionKind::SlideHome;
+                                state.target_x = state.home_x;
+                                state.target_y = state.home_y;
+                                state.duration = state.slide_duration;
+                            } else {
+                                state.kind = PetMotionKind::Hop;
+                                state.duration = Duration::from_millis(900);
+                            }
+                        }
+                        (x, y, frame)
+                    }
+                    PetMotionKind::Hop => {
+                        const HOP_MILLIS: f32 = 300.0;
+                        let elapsed_millis = elapsed.as_secs_f32() * 1_000.0;
+                        if progress >= 1.0 {
+                            state.kind = PetMotionKind::SlideHome;
+                            state.target_x = state.home_x;
+                            state.target_y = state.home_y;
+                            state.started_at = Instant::now();
+                            state.duration = state.slide_duration;
+                            (state.start_x, state.start_y, 0)
+                        } else {
+                            let hop_index = (elapsed_millis / HOP_MILLIS).floor() as i32;
+                            let hop_progress = (elapsed_millis % HOP_MILLIS) / HOP_MILLIS;
+                            let offset = -48.0 * 4.0 * hop_progress * (1.0 - hop_progress);
+                            let frame = if hop_index % 2 == 0 { 6 } else { 3 };
+                            (state.start_x, state.start_y + offset.round() as i32, frame)
+                        }
+                    }
+                    PetMotionKind::SlideHome => {
+                        let eased = smoothstep(progress);
+                        let x = state.start_x
+                            + ((state.target_x - state.start_x) as f32 * eased).round() as i32;
+                        let y = state.start_y
+                            + ((state.target_y - state.start_y) as f32 * eased).round() as i32;
+                        let frame = if (elapsed.as_millis() / 160).is_multiple_of(2) {
+                            0
+                        } else {
+                            2
+                        };
+                        finished = progress >= 1.0;
+                        (x, y, frame)
+                    }
+                }
+            };
             pet.window().set_position(PhysicalPosition::new(x, y));
-            pet.set_frame_index(walking_frame);
-            if !completed {
-                return;
+            pet.set_frame_index(frame);
+            if let Some(text) = show_notification {
+                *notification_message.borrow_mut() = text.clone();
+                *animation_sequence.borrow_mut() = vec![6, 6, 6, 3];
+                if let Some(notification) = weak_notification.upgrade() {
+                    notification.set_message(text.into());
+                    position_notification(&notification, &pet);
+                    let _ = notification.show();
+                }
             }
-            motion.borrow_mut().take();
-            if let Some(timer) = weak_timer.upgrade() {
-                timer.stop();
-            }
-            *notification_message.borrow_mut() = text.clone();
-            *animation_sequence.borrow_mut() = vec![6, 6, 6, 3];
-            if let Some(notification) = weak_notification.upgrade() {
-                notification.set_message(text.into());
-                position_notification(&notification, &pet);
-                let _ = notification.show();
+            if finished {
+                motion.borrow_mut().take();
+                animation_sequence.borrow_mut().clear();
+                pet.set_frame_index(0);
+                if let Some(timer) = weak_timer.upgrade() {
+                    timer.stop();
+                }
             }
         });
         motion_timer.stop();
@@ -991,13 +1061,20 @@ fn create_alert_presenter(
         } else {
             (750.0 + distance * 0.8).clamp(900.0, 1_800.0)
         };
+        let reduce_motion = settings.borrow().reduce_motion;
+        let slide_duration = Duration::from_millis(base_millis as u64);
         *presenter_motion.borrow_mut() = Some(PetMotion {
+            kind: PetMotionKind::SlideToCenter,
             start_x: start.x,
             start_y: start.y,
             target_x,
             target_y,
+            home_x: start.x,
+            home_y: start.y,
             started_at: Instant::now(),
-            duration: Duration::from_millis(base_millis as u64),
+            duration: slide_duration,
+            slide_duration,
+            reduce_motion,
             message: text,
         });
         let _ = pet.show();
