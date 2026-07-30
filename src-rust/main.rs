@@ -266,6 +266,36 @@ fn run() -> Result<()> {
         });
     }
 
+    let menu_dismiss_timer = Timer::default();
+    {
+        let weak_pet = pet.as_weak();
+        pet.on_request_menu_focus(move || {
+            if let Some(pet) = weak_pet.upgrade() {
+                platform::focus_window(pet.window());
+            }
+        });
+
+        let weak_pet = pet.as_weak();
+        let menu_was_visible = Rc::new(RefCell::new(false));
+        menu_dismiss_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
+            let Some(pet) = weak_pet.upgrade() else {
+                return;
+            };
+            if !pet.get_menu_visible() {
+                *menu_was_visible.borrow_mut() = false;
+                return;
+            }
+            if !*menu_was_visible.borrow() {
+                *menu_was_visible.borrow_mut() = true;
+                return;
+            }
+            if !platform::window_has_focus(pet.window()) {
+                pet.set_menu_visible(false);
+                *menu_was_visible.borrow_mut() = false;
+            }
+        });
+    }
+
     pet.on_exit(|| {
         let _ = slint::quit_event_loop();
     });

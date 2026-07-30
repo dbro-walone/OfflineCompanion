@@ -99,6 +99,7 @@ export component PetWindow inherits Window {
     callback drag-start(length, length);
     callback drag-move(length, length);
     callback drag-end();
+    callback request-menu-focus();
     in-out property <int> frame-index: 0;
     in property <bool> reduce-motion: false;
     in property <bool> topmost-enabled: true;
@@ -130,9 +131,11 @@ export component PetWindow inherits Window {
         mouse-cursor: pointer;
         pointer-event(event) => {
             if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                root.request-menu-focus();
                 root.menu-visible = !root.menu-visible;
             }
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.menu-visible = false;
                 root.drag-start(self.mouse-x, self.mouse-y);
             }
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {

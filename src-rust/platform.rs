@@ -14,6 +14,12 @@ impl WorkArea {
     }
 }
 
+pub fn focus_window(window: &slint::Window) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    let _ = window.with_winit_window(|window| window.focus_window());
+}
+
 #[cfg(windows)]
 pub fn active_work_area(window: &slint::Window) -> WorkArea {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -89,6 +95,31 @@ pub fn active_work_area(window: &slint::Window) -> WorkArea {
             right: 1920,
             bottom: 1080,
         })
+}
+
+#[cfg(windows)]
+pub fn window_has_focus(window: &slint::Window) -> bool {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::GetForegroundWindow};
+
+    let handle = window.window_handle();
+    let Ok(raw) = handle.window_handle() else {
+        return false;
+    };
+    let RawWindowHandle::Win32(win32) = raw.as_raw() else {
+        return false;
+    };
+    let hwnd = HWND(win32.hwnd.get() as *mut std::ffi::c_void);
+    unsafe { GetForegroundWindow() == hwnd }
+}
+
+#[cfg(not(windows))]
+pub fn window_has_focus(window: &slint::Window) -> bool {
+    use slint::winit_030::WinitWindowAccessor;
+
+    window
+        .with_winit_window(|window| window.has_focus())
+        .unwrap_or(false)
 }
 
 #[cfg(windows)]
