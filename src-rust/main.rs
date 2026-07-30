@@ -296,10 +296,15 @@ fn run() -> Result<()> {
         });
     }
 
-    pet.on_exit(|| {
-        let _ = slint::quit_event_loop();
-    });
+    wire_exit_behavior(
+        &pet,
+        &notification,
+        settings.clone(),
+        paths.clone(),
+        animation_sequence,
+    );
     pet.show()?;
+    let _intro_timer = play_intro_if_needed(&pet, settings, paths);
     slint::run_event_loop()?;
     Ok(())
 }
@@ -602,6 +607,7 @@ fn wire_settings(
     window.set_topmost_value(initial.topmost);
     window.set_idle_value(initial.idle_actions_enabled);
     window.set_reduce_motion_value(initial.reduce_motion);
+    window.set_close_to_tray_value(initial.close_to_tray);
     window.set_theme_index(if initial.theme == "light" { 1 } else { 0 });
     window.set_sedentary_minutes(initial.sedentary_minutes as i32);
     let weak_window = window.as_weak();
@@ -612,12 +618,13 @@ fn wire_settings(
     let weak_packages = packages.as_weak();
     let weak_notification = notification.as_weak();
     window.on_save(
-        move |scale, topmost, idle, reduce_motion, theme_index, sedentary| {
+        move |scale, topmost, idle, reduce_motion, close_to_tray, theme_index, sedentary| {
             let mut value = settings.borrow_mut();
             value.pet_scale = scale.clamp(0.75, 1.4);
             value.topmost = topmost;
             value.idle_actions_enabled = idle;
             value.reduce_motion = reduce_motion;
+            value.close_to_tray = close_to_tray;
             value.theme = if theme_index == 1 { "light" } else { "dark" }.into();
             value.sedentary_minutes = sedentary.clamp(30, 120) as u32;
             let _ = storage::save_settings(&paths.settings, &value);
@@ -910,6 +917,136 @@ fn format_reminder_alert(titles: &[String]) -> Option<String> {
 fn smoothstep(progress: f32) -> f32 {
     let progress = progress.clamp(0.0, 1.0);
     progress * progress * (3.0 - 2.0 * progress)
+}
+
+fn play_intro_if_needed(
+    pet: &PetWindow,
+    settings: Rc<RefCell<AppSettings>>,
+    paths: Rc<AppPaths>,
+) -> Option<Rc<Timer>> {
+    let should_play = {
+        let value = settings.borrow();
+        value.pet_left.is_none() && !value.has_seen_intro
+    };
+    if !should_play {
+        return None;
+    }
+
+    let reduce_motion = {
+        let mut value = settings.borrow_mut();
+        value.has_seen_intro = true;
+        let reduce_motion = value.reduce_motion;
+        let _ = storage::save_settings(&paths.settings, &value);
+        reduce_motion
+    };
+    if reduce_motion {
+        return None;
+    }
+
+    let area = platform::active_work_area(pet.window());
+    let width = pet.window().size().width as i32;
+    let height = pet.window().size().height as i32;
+    let target_x = area.right - width - 40;
+    let target_y = area.bottom - height - 40;
+    let start_y = target_y + height - 40;
+    pet.window()
+        .set_position(PhysicalPosition::new(target_x, start_y));
+
+    let started_at = Instant::now();
+    let timer = Rc::new(Timer::default());
+    let weak_timer = Rc::downgrade(&timer);
+    let weak_pet = pet.as_weak();
+    timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
+        let Some(pet) = weak_pet.upgrade() else {
+            return;
+        };
+        let progress = (started_at.elapsed().as_secs_f32() / 0.9).min(1.0);
+        let y = start_y + ((target_y - start_y) as f32 * smoothstep(progress)).round() as i32;
+        pet.window()
+            .set_position(PhysicalPosition::new(target_x, y));
+        if progress >= 1.0
+            && let Some(timer) = weak_timer.upgrade()
+        {
+            timer.stop();
+        }
+    });
+    Some(timer)
+}
+
+fn wire_exit_behavior(
+    pet: &PetWindow,
+    notification: &NotificationWindow,
+    settings: Rc<RefCell<AppSettings>>,
+    paths: Rc<AppPaths>,
+    animation_sequence: Rc<RefCell<Vec<i32>>>,
+) {
+    let farewell_started = Rc::new(RefCell::new(None::<Instant>));
+    let farewell_timer = Rc::new(Timer::default());
+    {
+        let weak_pet = pet.as_weak();
+        let weak_notification = notification.as_weak();
+        let weak_timer = Rc::downgrade(&farewell_timer);
+        let farewell_started = farewell_started.clone();
+        farewell_timer.start(TimerMode::Repeated, Duration::from_millis(150), move || {
+            let Some(started_at) = *farewell_started.borrow() else {
+                return;
+            };
+            let elapsed = started_at.elapsed();
+            if elapsed >= Duration::from_millis(1_200) {
+                if let Some(notification) = weak_notification.upgrade() {
+                    let _ = notification.hide();
+                }
+                if let Some(timer) = weak_timer.upgrade() {
+                    timer.stop();
+                }
+                let _ = slint::quit_event_loop();
+                return;
+            }
+            if let Some(pet) = weak_pet.upgrade() {
+                let frames = [6, 6, 6, 3];
+                let index = (elapsed.as_millis() / 250).min(3) as usize;
+                pet.set_frame_index(frames[index]);
+            }
+        });
+        farewell_timer.stop();
+    }
+
+    let weak_pet = pet.as_weak();
+    let weak_notification = notification.as_weak();
+    pet.on_exit(move || {
+        let Some(pet) = weak_pet.upgrade() else {
+            return;
+        };
+        pet.set_menu_visible(false);
+        if settings.borrow().close_to_tray {
+            let _ = pet.hide();
+            return;
+        }
+
+        if !settings.borrow().has_seen_close_prompt {
+            let result = rfd::MessageDialog::new()
+                .set_title("离线桌面陪伴助手")
+                .set_description("确定要退出吗？鸦影会想你的")
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show();
+            if result != rfd::MessageDialogResult::Yes {
+                return;
+            }
+            let mut value = settings.borrow_mut();
+            value.has_seen_close_prompt = true;
+            let _ = storage::save_settings(&paths.settings, &value);
+        }
+
+        animation_sequence.borrow_mut().clear();
+        pet.set_frame_index(6);
+        if let Some(notification) = weak_notification.upgrade() {
+            notification.set_message("呜呜…主人不要走🥺".into());
+            position_notification(&notification, &pet);
+            let _ = notification.show();
+        }
+        *farewell_started.borrow_mut() = Some(Instant::now());
+        farewell_timer.restart();
+    });
 }
 
 fn create_alert_presenter(
