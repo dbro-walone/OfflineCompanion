@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod model;
+mod motion;
 mod packages;
 mod platform;
 mod storage;
@@ -14,6 +15,7 @@ use std::{
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveDateTime, TimeZone, Timelike};
 use model::{AppSettings, PomodoroPhase, PomodoroState};
+use motion::MotionLibrary;
 use slint::{ComponentHandle, ModelRc, PhysicalPosition, Timer, TimerMode, VecModel};
 use storage::{AppPaths, Store};
 
@@ -44,6 +46,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let paths = Rc::new(AppPaths::discover()?);
+    let motion = Rc::new(MotionLibrary::load(&paths.actions));
     let store = Rc::new(Store::open(&paths.database)?);
     let settings = Rc::new(RefCell::new(storage::load_settings(&paths.settings)));
     let pomodoro = Rc::new(RefCell::new(store.load_pomodoro()?.unwrap_or_default()));
@@ -100,6 +103,7 @@ fn run() -> Result<()> {
         active_todo.clone(),
         store.clone(),
         pomodoro_five_minute_notified.clone(),
+        motion.clone(),
     );
     wire_settings(
         &settings_window,
@@ -120,11 +124,12 @@ fn run() -> Result<()> {
         let sequences = animation_sequence.clone();
         let index = animation_index.clone();
         let suppress_next_pet_click = suppress_next_pet_click.clone();
+        let motion = motion.clone();
         pet.on_pet_clicked(move || {
             if std::mem::take(&mut *suppress_next_pet_click.borrow_mut()) {
                 return;
             }
-            *sequences.borrow_mut() = vec![4, 5, 3];
+            *sequences.borrow_mut() = motion.resolve("bubble");
             *index.borrow_mut() = 0;
         });
     }
@@ -160,6 +165,7 @@ fn run() -> Result<()> {
         settings.clone(),
         notification_message.clone(),
         animation_sequence.clone(),
+        motion.clone(),
     );
     wire_pet_drag(
         &pet,
@@ -530,6 +536,7 @@ fn wire_timer(
     active_todo: Rc<RefCell<String>>,
     store: Rc<Store>,
     five_minute_notified: Rc<RefCell<bool>>,
+    motion: Rc<MotionLibrary>,
 ) {
     {
         let weak = window.as_weak();
@@ -538,6 +545,7 @@ fn wire_timer(
         let weak_pet = pet.as_weak();
         let store = store.clone();
         let five_minute_notified = five_minute_notified.clone();
+        let motion = motion.clone();
         window.on_start(move || {
             *five_minute_notified.borrow_mut() = false;
             let mut state = state.borrow_mut();
@@ -549,7 +557,7 @@ fn wire_timer(
                 let _ = window.hide();
             }
             if let Some(pet) = weak_pet.upgrade() {
-                pet.set_frame_index(1);
+                pet.set_frame_index(motion.resolve("focus").first().copied().unwrap_or(1));
             }
         });
     }
@@ -918,6 +926,7 @@ fn create_alert_presenter(
     settings: Rc<RefCell<AppSettings>>,
     notification_message: Rc<RefCell<String>>,
     animation_sequence: Rc<RefCell<Vec<i32>>>,
+    motion_library: Rc<MotionLibrary>,
 ) -> (AlertPresenter, CancelMotion) {
     let motion = Rc::new(RefCell::new(None::<PetMotion>));
     let motion_timer = Rc::new(Timer::default());
@@ -928,6 +937,7 @@ fn create_alert_presenter(
         let weak_timer = Rc::downgrade(&motion_timer);
         let notification_message = notification_message.clone();
         let animation_sequence = animation_sequence.clone();
+        let motion_library = motion_library.clone();
         motion_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
             let (x, y, walking_frame, completed, text) = {
                 let motion = motion.borrow();
@@ -939,18 +949,18 @@ fn create_alert_presenter(
                     + ((state.target_x - state.start_x) as f32 * eased).round() as i32;
                 let y = state.start_y
                     + ((state.target_y - state.start_y) as f32 * eased).round() as i32;
-                let walking_frame = if (elapsed.as_millis() / 160).is_multiple_of(2) {
-                    0
-                } else {
-                    2
-                };
+                let walk = motion_library.resolve("walk");
+                let walking_frame = (!walk.is_empty())
+                    .then(|| walk[(elapsed.as_millis() / 160) as usize % walk.len()]);
                 (x, y, walking_frame, progress >= 1.0, state.message.clone())
             };
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
             pet.window().set_position(PhysicalPosition::new(x, y));
-            pet.set_frame_index(walking_frame);
+            if let Some(walking_frame) = walking_frame {
+                pet.set_frame_index(walking_frame);
+            }
             if !completed {
                 return;
             }
@@ -959,7 +969,7 @@ fn create_alert_presenter(
                 timer.stop();
             }
             *notification_message.borrow_mut() = text.clone();
-            *animation_sequence.borrow_mut() = vec![6, 6, 6, 3];
+            *animation_sequence.borrow_mut() = motion_library.resolve("encourage");
             if let Some(notification) = weak_notification.upgrade() {
                 notification.set_message(text.into());
                 position_notification(&notification, &pet);
@@ -973,6 +983,7 @@ fn create_alert_presenter(
     let weak_notification = notification.as_weak();
     let presenter_motion = motion.clone();
     let presenter_timer = motion_timer.clone();
+    let presenter_motion_library = motion_library;
     let presenter = Rc::new(move |text: String| {
         let Some(pet) = weak_pet.upgrade() else {
             return;
@@ -981,7 +992,13 @@ fn create_alert_presenter(
             let _ = notification.hide();
         }
         animation_sequence.borrow_mut().clear();
-        pet.set_frame_index(0);
+        pet.set_frame_index(
+            presenter_motion_library
+                .resolve("idle")
+                .first()
+                .copied()
+                .unwrap_or(0),
+        );
         let start = pet.window().position();
         let (target_x, target_y) = platform::active_work_area(pet.window())
             .center(pet.window().size().width, pet.window().size().height);
