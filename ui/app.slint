@@ -99,12 +99,12 @@ export component PetWindow inherits Window {
     callback drag-start(length, length);
     callback drag-move(length, length);
     callback drag-end();
-    callback request-menu-focus();
+    callback toggle-menu();
+    callback close-menu();
     in-out property <int> frame-index: 0;
     in property <bool> reduce-motion: false;
     in property <bool> topmost-enabled: true;
     in property <float> pet-scale: 1.0;
-    in-out property <bool> menu-visible: false;
     width: 250px * root.pet-scale;
     height: 330px * root.pet-scale;
     no-frame: true;
@@ -131,11 +131,10 @@ export component PetWindow inherits Window {
         mouse-cursor: pointer;
         pointer-event(event) => {
             if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
-                root.request-menu-focus();
-                root.menu-visible = !root.menu-visible;
+                root.toggle-menu();
             }
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                root.menu-visible = false;
+                root.close-menu();
                 root.drag-start(self.mouse-x, self.mouse-y);
             }
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
@@ -152,8 +151,29 @@ export component PetWindow inherits Window {
         Text { text: "🛡"; font-size: 42px; horizontal-alignment: center; vertical-alignment: center; }
         animate opacity { duration: 180ms; }
     }
-    if root.menu-visible: Rectangle {
-        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 194px; height: 246px;
+}
+
+export component PetMenuWindow inherits Window {
+    callback dismiss();
+    callback open-todos();
+    callback open-reminder();
+    callback open-timer();
+    callback open-settings();
+    callback open-packages();
+    callback play-wave();
+    callback play-jump();
+    callback play-cry();
+    callback hide-to-tray();
+    callback exit();
+    width: 210px;
+    height: 414px;
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    title: "鸦影菜单";
+
+    Rectangle {
+        x: 6px; y: 6px; width: parent.width - 12px; height: parent.height - 12px;
         background: Theme.popup-background;
         border-color: Theme.stroke;
         border-width: 1px;
@@ -163,12 +183,21 @@ export component PetWindow inherits Window {
         VerticalLayout {
             padding: 8px;
             spacing: 2px;
-            Button { text: "待办事项"; clicked => { root.menu-visible=false; root.open-todos(); } }
-            Button { text: "定时提醒"; clicked => { root.menu-visible=false; root.open-reminder(); } }
-            Button { text: "番茄钟"; clicked => { root.menu-visible=false; root.open-timer(); } }
-            Button { text: "角色与动作管理"; clicked => { root.menu-visible=false; root.open-packages(); } }
-            Button { text: "设置"; clicked => { root.menu-visible=false; root.open-settings(); } }
-            Button { text: "退出"; clicked => { root.exit(); } }
+            Button { text: "待办事项"; clicked => { root.dismiss(); root.open-todos(); } }
+            Button { text: "定时提醒"; clicked => { root.dismiss(); root.open-reminder(); } }
+            Button { text: "番茄钟"; clicked => { root.dismiss(); root.open-timer(); } }
+            Text { height: 22px; text: "动作"; color: Theme.text-secondary; vertical-alignment: center; }
+            HorizontalLayout {
+                height: 40px;
+                spacing: 2px;
+                Button { text: "挥手"; clicked => { root.dismiss(); root.play-wave(); } }
+                Button { text: "跳跃"; clicked => { root.dismiss(); root.play-jump(); } }
+                Button { text: "撒娇"; clicked => { root.dismiss(); root.play-cry(); } }
+            }
+            Button { text: "角色与动作管理"; clicked => { root.dismiss(); root.open-packages(); } }
+            Button { text: "设置"; clicked => { root.dismiss(); root.open-settings(); } }
+            Button { text: "隐藏到托盘"; clicked => { root.dismiss(); root.hide-to-tray(); } }
+            Button { text: "退出"; clicked => { root.dismiss(); root.exit(); } }
         }
     }
 }
@@ -428,14 +457,15 @@ export component NotificationWindow inherits Window {
     callback dismiss();
     callback snooze();
     in property <string> message: "提醒";
+    in property <bool> exit-mode: false;
     width: 390px; height: 230px; no-frame: true; always-on-top: true; background: transparent; title: "提醒";
     WindowSurface {
         x: 10px; y: 10px; width: parent.width - 20px; height: parent.height - 20px;
         VerticalLayout {
             padding: 18px; spacing: 8px;
-            Text { text: "提醒"; color: Theme.accent; font-weight: 600; }
+            Text { text: root.exit-mode ? "鸦影" : "提醒"; color: Theme.accent; font-weight: 600; }
             Text { text: root.message; color: Theme.text-primary; font-size: 15px; wrap: word-wrap; overflow: elide; }
-            HorizontalLayout {
+            if !root.exit-mode: HorizontalLayout {
                 height: 42px;
                 alignment: end;
                 Button { text: "延后 10 分钟"; clicked => { root.snooze(); } }
