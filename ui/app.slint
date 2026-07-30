@@ -1,7 +1,10 @@
-import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, Slider } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette, ScrollView, Slider } from "std-widgets.slint";
 
 export global Theme {
     in-out property <bool> light: false;
+    changed light => {
+        Palette.color-scheme = light ? ColorScheme.light : ColorScheme.dark;
+    }
     out property <brush> window-background: light ? #f8f6fa : #20212b;
     out property <brush> panel-background: light ? #fffcff : #2a2c38;
     out property <brush> popup-background: light ? #fffafff5 : #2a2c38f5;
@@ -33,7 +36,7 @@ component WindowSurface inherits Rectangle {
     border-radius: 18px;
     drop-shadow-blur: 24px;
     drop-shadow-offset-y: 6px;
-    drop-shadow-color: #08091270;
+    drop-shadow-color: Theme.light ? #3f354924 : #08091270;
 }
 
 component HeaderBar inherits Rectangle {
@@ -149,11 +152,11 @@ export component PetWindow inherits Window {
     if root.menu-visible: Rectangle {
         x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 194px; height: 246px;
         background: Theme.popup-background;
-        border-color: #4b4e60;
+        border-color: Theme.stroke;
         border-width: 1px;
         border-radius: 12px;
         drop-shadow-blur: 18px;
-        drop-shadow-color: #08091280;
+        drop-shadow-color: Theme.light ? #3f354930 : #08091280;
         VerticalLayout {
             padding: 8px;
             spacing: 2px;
