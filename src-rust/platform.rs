@@ -21,6 +21,40 @@ pub fn focus_window(window: &slint::Window) {
 }
 
 #[cfg(windows)]
+pub fn assert_topmost(window: &slint::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{
+            HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        },
+    };
+
+    let handle = window.window_handle();
+    let Ok(raw) = handle.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = raw.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(win32.hwnd.get() as *mut std::ffi::c_void);
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+pub fn assert_topmost(_window: &slint::Window) {}
+
+#[cfg(windows)]
 pub fn active_work_area(window: &slint::Window) -> WorkArea {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{

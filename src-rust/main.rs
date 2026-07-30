@@ -300,6 +300,22 @@ fn run() -> Result<()> {
         let _ = slint::quit_event_loop();
     });
     pet.show()?;
+    let topmost_timer = Timer::default();
+    {
+        let weak_pet = pet.as_weak();
+        topmost_timer.start(
+            TimerMode::Repeated,
+            Duration::from_millis(2000),
+            move || {
+                let Some(pet) = weak_pet.upgrade() else {
+                    return;
+                };
+                if pet.get_topmost_enabled() {
+                    platform::assert_topmost(pet.window());
+                }
+            },
+        );
+    }
     slint::run_event_loop()?;
     Ok(())
 }
@@ -848,6 +864,9 @@ fn update_timer_view(window: &TimerWindow, state: &PomodoroState, todo: &str) {
 fn apply_settings_to_pet(pet: &PetWindow, settings: &AppSettings) {
     pet.set_pet_scale(settings.pet_scale);
     pet.set_topmost_enabled(settings.topmost);
+    if settings.topmost {
+        platform::assert_topmost(pet.window());
+    }
     pet.set_reduce_motion(settings.reduce_motion);
 }
 
