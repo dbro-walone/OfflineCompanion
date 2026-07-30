@@ -7,6 +7,7 @@ mod storage;
 
 use std::{
     cell::RefCell,
+    path::{Path, PathBuf},
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -16,8 +17,17 @@ use chrono::{Local, NaiveDateTime, TimeZone, Timelike};
 use model::{AppSettings, PomodoroPhase, PomodoroState};
 use slint::{ComponentHandle, ModelRc, PhysicalPosition, Timer, TimerMode, VecModel};
 use storage::{AppPaths, Store};
+use tray_icon::{
+    Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
+    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+};
 
 slint::include_modules!();
+
+const TRAY_ICON_PATH: &str = "packages/characters/shadow-crow-ninja/icon.png";
+const TRAY_SHOW_ID: &str = "tray-show-pet";
+const TRAY_HIDE_ID: &str = "tray-hide-pet";
+const TRAY_QUIT_ID: &str = "tray-quit";
 
 struct PetMotion {
     start_x: i32,
@@ -53,6 +63,7 @@ fn run() -> Result<()> {
     let suppress_next_pet_click = Rc::new(RefCell::new(false));
 
     let pet = PetWindow::new()?;
+    platform::hide_from_taskbar(pet.window());
     let todos = TodoWindow::new()?;
     let reminder = ReminderWindow::new()?;
     let timer_window = TimerWindow::new()?;
@@ -300,8 +311,135 @@ fn run() -> Result<()> {
         let _ = slint::quit_event_loop();
     });
     pet.show()?;
+    platform::hide_from_taskbar(pet.window());
+    let taskbar_style_timer = Timer::default();
+    {
+        let weak_pet = pet.as_weak();
+        taskbar_style_timer.start(TimerMode::SingleShot, Duration::ZERO, move || {
+            if let Some(pet) = weak_pet.upgrade() {
+                platform::hide_from_taskbar(pet.window());
+            }
+        });
+    }
+
+    let tray_icon = match build_tray_icon() {
+        Ok(tray_icon) => Some(tray_icon),
+        Err(error) => {
+            eprintln!("无法创建系统托盘图标：{error:#}");
+            None
+        }
+    };
+    let tray_event_timer = Timer::default();
+    if let Some(tray_icon) = tray_icon.as_ref() {
+        let tray_id = tray_icon.id().clone();
+        let weak_pet = pet.as_weak();
+        tray_event_timer.start(TimerMode::Repeated, Duration::from_millis(75), move || {
+            while let Ok(event) = MenuEvent::receiver().try_recv() {
+                let Some(pet) = weak_pet.upgrade() else {
+                    return;
+                };
+                match event.id.as_ref() {
+                    TRAY_SHOW_ID => {
+                        let _ = pet.show();
+                    }
+                    TRAY_HIDE_ID => {
+                        let _ = pet.hide();
+                    }
+                    TRAY_QUIT_ID => {
+                        let _ = slint::quit_event_loop();
+                    }
+                    _ => {}
+                }
+            }
+
+            while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+                if event.id() != &tray_id {
+                    continue;
+                }
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = event
+                    && let Some(pet) = weak_pet.upgrade()
+                {
+                    if pet.window().is_visible() {
+                        let _ = pet.hide();
+                    } else {
+                        let _ = pet.show();
+                    }
+                }
+            }
+        });
+    }
     slint::run_event_loop()?;
+    drop(tray_icon);
     Ok(())
+}
+
+fn build_tray_icon() -> Result<TrayIcon> {
+    let menu = Menu::new();
+    let show_item = MenuItem::with_id(TRAY_SHOW_ID, "显示鸦影", true, None);
+    let hide_item = MenuItem::with_id(TRAY_HIDE_ID, "隐藏鸦影", true, None);
+    let separator = PredefinedMenuItem::separator();
+    let quit_item = MenuItem::with_id(TRAY_QUIT_ID, "退出", true, None);
+    menu.append_items(&[&show_item, &hide_item, &separator, &quit_item])
+        .context("无法创建托盘菜单")?;
+
+    TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false)
+        .with_tooltip("鸦影")
+        .with_icon(load_tray_icon()?)
+        .build()
+        .context("无法注册系统托盘图标")
+}
+
+fn load_tray_icon() -> Result<Icon> {
+    for path in tray_icon_paths(std::env::current_exe().ok().as_deref()) {
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
+        let Ok(image) = image::load_from_memory(&bytes) else {
+            continue;
+        };
+        let rgba = image
+            .resize_exact(32, 32, image::imageops::FilterType::Lanczos3)
+            .to_rgba8();
+        if let Ok(icon) = Icon::from_rgba(rgba.into_raw(), 32, 32) {
+            return Ok(icon);
+        }
+    }
+
+    Icon::from_rgba(fallback_tray_icon_rgba(), 32, 32).context("无法创建备用托盘图标")
+}
+
+fn tray_icon_paths(executable: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = vec![PathBuf::from(TRAY_ICON_PATH)];
+    if let Some(executable_dir) = executable.and_then(Path::parent) {
+        paths.push(executable_dir.join(TRAY_ICON_PATH));
+        paths.push(executable_dir.join("icon.png"));
+    }
+    paths
+}
+
+fn fallback_tray_icon_rgba() -> Vec<u8> {
+    let mut rgba = vec![0; 32 * 32 * 4];
+    for y in 0..32 {
+        for x in 0..32 {
+            let dx = x as i32 - 16;
+            let dy = y as i32 - 16;
+            if dx * dx + dy * dy <= 13 * 13 {
+                let offset = (y * 32 + x) * 4;
+                rgba[offset..offset + 4].copy_from_slice(&[35, 28, 48, 255]);
+            }
+        }
+    }
+    for (x, y) in [(11, 14), (20, 14)] {
+        let offset = (y * 32 + x) * 4;
+        rgba[offset..offset + 4].copy_from_slice(&[180, 120, 255, 255]);
+    }
+    rgba
 }
 
 fn wire_basic_windows(
@@ -1050,5 +1188,10 @@ mod app_tests {
             .map(|step| smoothstep(step as f32 / 10.0))
             .collect::<Vec<_>>();
         assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+
+    #[test]
+    fn fallback_tray_icon_has_expected_rgba_dimensions() {
+        assert_eq!(fallback_tray_icon_rgba().len(), 32 * 32 * 4);
     }
 }

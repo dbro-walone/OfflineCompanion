@@ -21,6 +21,35 @@ pub fn focus_window(window: &slint::Window) {
 }
 
 #[cfg(windows)]
+pub fn hide_from_taskbar(window: &slint::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        },
+    };
+
+    let handle = window.window_handle();
+    let Ok(raw) = handle.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = raw.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(win32.hwnd.get() as *mut std::ffi::c_void);
+    unsafe {
+        let extended_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let extended_style =
+            (extended_style | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, extended_style);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn hide_from_taskbar(_window: &slint::Window) {}
+
+#[cfg(windows)]
 pub fn active_work_area(window: &slint::Window) -> WorkArea {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{
