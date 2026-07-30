@@ -29,6 +29,16 @@ struct PetMotion {
     message: String,
 }
 
+#[derive(Clone)]
+struct ReminderAnimation {
+    sequence: Rc<RefCell<Vec<i32>>>,
+    index: Rc<RefCell<usize>>,
+    hopping: Rc<RefCell<bool>>,
+    return_position: Rc<RefCell<Option<(i32, i32)>>>,
+    motion: Rc<RefCell<Option<PetMotion>>>,
+    motion_timer: Rc<Timer>,
+}
+
 type AlertPresenter = Rc<dyn Fn(String)>;
 type CancelMotion = Rc<dyn Fn()>;
 
@@ -113,12 +123,17 @@ fn run() -> Result<()> {
         paths.clone(),
     );
     wire_packages(&package_window, paths.clone());
-    wire_notification(&notification, notification_message.clone(), store.clone());
-    let animation_sequence = Rc::new(RefCell::new(Vec::<i32>::new()));
-    let animation_index = Rc::new(RefCell::new(0usize));
+    let reminder_animation = ReminderAnimation {
+        sequence: Rc::new(RefCell::new(Vec::<i32>::new())),
+        index: Rc::new(RefCell::new(0usize)),
+        hopping: Rc::new(RefCell::new(false)),
+        return_position: Rc::new(RefCell::new(None::<(i32, i32)>)),
+        motion: Rc::new(RefCell::new(None::<PetMotion>)),
+        motion_timer: Rc::new(Timer::default()),
+    };
     {
-        let sequences = animation_sequence.clone();
-        let index = animation_index.clone();
+        let sequences = reminder_animation.sequence.clone();
+        let index = reminder_animation.index.clone();
         let suppress_next_pet_click = suppress_next_pet_click.clone();
         pet.on_pet_clicked(move || {
             if std::mem::take(&mut *suppress_next_pet_click.borrow_mut()) {
@@ -132,12 +147,17 @@ fn run() -> Result<()> {
     let animation_timer = Timer::default();
     {
         let weak_pet = pet.as_weak();
-        let sequences = animation_sequence.clone();
-        let index = animation_index.clone();
+        let sequences = reminder_animation.sequence.clone();
+        let index = reminder_animation.index.clone();
+        let reminder_hopping = reminder_animation.hopping.clone();
         animation_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
+            if sequences.borrow().is_empty() && *reminder_hopping.borrow() {
+                *sequences.borrow_mut() = vec![6, 6, 7, 7];
+                *index.borrow_mut() = 0;
+            }
             let sequence = sequences.borrow();
             if sequence.is_empty() {
                 return;
@@ -148,7 +168,11 @@ fn run() -> Result<()> {
             if *position >= sequence.len() {
                 drop(position);
                 drop(sequence);
-                sequences.borrow_mut().clear();
+                if *reminder_hopping.borrow() {
+                    *sequences.borrow_mut() = vec![6, 6, 7, 7];
+                } else {
+                    sequences.borrow_mut().clear();
+                }
                 *index.borrow_mut() = 0;
             }
         });
@@ -159,7 +183,15 @@ fn run() -> Result<()> {
         &notification,
         settings.clone(),
         notification_message.clone(),
-        animation_sequence.clone(),
+        reminder_animation.clone(),
+    );
+    wire_notification(
+        &notification,
+        &pet,
+        notification_message.clone(),
+        store.clone(),
+        settings.clone(),
+        reminder_animation,
     );
     wire_pet_drag(
         &pet,
@@ -667,12 +699,53 @@ fn wire_packages(window: &PackageWindow, paths: Rc<AppPaths>) {
     });
 }
 
-fn wire_notification(window: &NotificationWindow, message: Rc<RefCell<String>>, store: Rc<Store>) {
+fn wire_notification(
+    window: &NotificationWindow,
+    pet: &PetWindow,
+    message: Rc<RefCell<String>>,
+    store: Rc<Store>,
+    settings: Rc<RefCell<AppSettings>>,
+    animation: ReminderAnimation,
+) {
+    let weak_pet = pet.as_weak();
+    let restore_pet = Rc::new(move || {
+        *animation.hopping.borrow_mut() = false;
+        animation.sequence.borrow_mut().clear();
+        *animation.index.borrow_mut() = 0;
+
+        let Some(pet) = weak_pet.upgrade() else {
+            return;
+        };
+        let Some((target_x, target_y)) = animation.return_position.borrow_mut().take() else {
+            pet.set_frame_index(0);
+            return;
+        };
+        let start = pet.window().position();
+        let distance = (((target_x - start.x).pow(2) + (target_y - start.y).pow(2)) as f32).sqrt();
+        let duration_millis = if settings.borrow().reduce_motion {
+            550.0
+        } else {
+            (650.0 + distance * 0.55).clamp(800.0, 1_200.0)
+        };
+        *animation.motion.borrow_mut() = Some(PetMotion {
+            start_x: start.x,
+            start_y: start.y,
+            target_x,
+            target_y,
+            started_at: Instant::now(),
+            duration: Duration::from_millis(duration_millis as u64),
+            message: String::new(),
+        });
+        animation.motion_timer.restart();
+    });
+
     let weak = window.as_weak();
+    let restore_pet_after_dismiss = restore_pet.clone();
     window.on_dismiss(move || {
         if let Some(window) = weak.upgrade() {
             let _ = window.hide();
         }
+        restore_pet_after_dismiss();
     });
     let weak = window.as_weak();
     window.on_snooze(move || {
@@ -683,6 +756,7 @@ fn wire_notification(window: &NotificationWindow, message: Rc<RefCell<String>>, 
         if let Some(window) = weak.upgrade() {
             let _ = window.hide();
         }
+        restore_pet();
     });
 }
 
@@ -917,62 +991,76 @@ fn create_alert_presenter(
     notification: &NotificationWindow,
     settings: Rc<RefCell<AppSettings>>,
     notification_message: Rc<RefCell<String>>,
-    animation_sequence: Rc<RefCell<Vec<i32>>>,
+    animation: ReminderAnimation,
 ) -> (AlertPresenter, CancelMotion) {
-    let motion = Rc::new(RefCell::new(None::<PetMotion>));
-    let motion_timer = Rc::new(Timer::default());
     {
         let weak_pet = pet.as_weak();
         let weak_notification = notification.as_weak();
-        let motion = motion.clone();
-        let weak_timer = Rc::downgrade(&motion_timer);
+        let motion = animation.motion.clone();
+        let weak_timer = Rc::downgrade(&animation.motion_timer);
         let notification_message = notification_message.clone();
-        let animation_sequence = animation_sequence.clone();
-        motion_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
-            let (x, y, walking_frame, completed, text) = {
-                let motion = motion.borrow();
-                let Some(state) = motion.as_ref() else { return };
-                let elapsed = state.started_at.elapsed();
-                let progress = (elapsed.as_secs_f32() / state.duration.as_secs_f32()).min(1.0);
-                let eased = smoothstep(progress);
-                let x = state.start_x
-                    + ((state.target_x - state.start_x) as f32 * eased).round() as i32;
-                let y = state.start_y
-                    + ((state.target_y - state.start_y) as f32 * eased).round() as i32;
-                let walking_frame = if (elapsed.as_millis() / 160).is_multiple_of(2) {
-                    0
-                } else {
-                    2
+        let timer_animation = animation.clone();
+        animation
+            .motion_timer
+            .start(TimerMode::Repeated, Duration::from_millis(16), move || {
+                let (x, y, walking_frame, completed, start_x, start_y, text) = {
+                    let motion = motion.borrow();
+                    let Some(state) = motion.as_ref() else { return };
+                    let elapsed = state.started_at.elapsed();
+                    let progress = (elapsed.as_secs_f32() / state.duration.as_secs_f32()).min(1.0);
+                    let eased = smoothstep(progress);
+                    let x = state.start_x
+                        + ((state.target_x - state.start_x) as f32 * eased).round() as i32;
+                    let y = state.start_y
+                        + ((state.target_y - state.start_y) as f32 * eased).round() as i32;
+                    let walking_frame = if (elapsed.as_millis() / 160).is_multiple_of(2) {
+                        0
+                    } else {
+                        2
+                    };
+                    (
+                        x,
+                        y,
+                        walking_frame,
+                        progress >= 1.0,
+                        state.start_x,
+                        state.start_y,
+                        state.message.clone(),
+                    )
                 };
-                (x, y, walking_frame, progress >= 1.0, state.message.clone())
-            };
-            let Some(pet) = weak_pet.upgrade() else {
-                return;
-            };
-            pet.window().set_position(PhysicalPosition::new(x, y));
-            pet.set_frame_index(walking_frame);
-            if !completed {
-                return;
-            }
-            motion.borrow_mut().take();
-            if let Some(timer) = weak_timer.upgrade() {
-                timer.stop();
-            }
-            *notification_message.borrow_mut() = text.clone();
-            *animation_sequence.borrow_mut() = vec![6, 6, 6, 3];
-            if let Some(notification) = weak_notification.upgrade() {
-                notification.set_message(text.into());
-                position_notification(&notification, &pet);
-                let _ = notification.show();
-            }
-        });
-        motion_timer.stop();
+                let Some(pet) = weak_pet.upgrade() else {
+                    return;
+                };
+                pet.window().set_position(PhysicalPosition::new(x, y));
+                pet.set_frame_index(walking_frame);
+                if !completed {
+                    return;
+                }
+                motion.borrow_mut().take();
+                if let Some(timer) = weak_timer.upgrade() {
+                    timer.stop();
+                }
+                if text.is_empty() {
+                    pet.set_frame_index(0);
+                    return;
+                }
+                *timer_animation.return_position.borrow_mut() = Some((start_x, start_y));
+                *timer_animation.hopping.borrow_mut() = true;
+                *notification_message.borrow_mut() = text.clone();
+                *timer_animation.sequence.borrow_mut() = vec![6, 6, 7, 7];
+                *timer_animation.index.borrow_mut() = 0;
+                if let Some(notification) = weak_notification.upgrade() {
+                    notification.set_message(text.into());
+                    position_notification(&notification, &pet);
+                    let _ = notification.show();
+                }
+            });
+        animation.motion_timer.stop();
     }
 
     let weak_pet = pet.as_weak();
     let weak_notification = notification.as_weak();
-    let presenter_motion = motion.clone();
-    let presenter_timer = motion_timer.clone();
+    let presenter_animation = animation.clone();
     let presenter = Rc::new(move |text: String| {
         let Some(pet) = weak_pet.upgrade() else {
             return;
@@ -980,7 +1068,9 @@ fn create_alert_presenter(
         if let Some(notification) = weak_notification.upgrade() {
             let _ = notification.hide();
         }
-        animation_sequence.borrow_mut().clear();
+        *presenter_animation.hopping.borrow_mut() = false;
+        presenter_animation.sequence.borrow_mut().clear();
+        *presenter_animation.index.borrow_mut() = 0;
         pet.set_frame_index(0);
         let start = pet.window().position();
         let (target_x, target_y) = platform::active_work_area(pet.window())
@@ -991,7 +1081,7 @@ fn create_alert_presenter(
         } else {
             (750.0 + distance * 0.8).clamp(900.0, 1_800.0)
         };
-        *presenter_motion.borrow_mut() = Some(PetMotion {
+        *presenter_animation.motion.borrow_mut() = Some(PetMotion {
             start_x: start.x,
             start_y: start.y,
             target_x,
@@ -1001,11 +1091,11 @@ fn create_alert_presenter(
             message: text,
         });
         let _ = pet.show();
-        presenter_timer.restart();
+        presenter_animation.motion_timer.restart();
     });
     let cancel = Rc::new(move || {
-        motion.borrow_mut().take();
-        motion_timer.stop();
+        animation.motion.borrow_mut().take();
+        animation.motion_timer.stop();
     });
     (presenter, cancel)
 }
