@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod animation;
+mod behavior;
 mod model;
+mod package_runtime;
 mod packages;
 mod platform;
 mod storage;
