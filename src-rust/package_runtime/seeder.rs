@@ -1,0 +1,131 @@
+use anyhow::Result;
+use std::{fs, path::Path};
+const FILES: &[(&str, &[u8])] = &[
+    (
+        "characters/shadow-crow-ninja/manifest.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/manifest.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/atlases/base.png",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/atlases/base.png"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/preview.png",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/preview.png"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/icon.png",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/icon.png"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/idle.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/idle.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/clicked.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/clicked.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/dragged.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/dragged.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/reminder.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/reminder.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/celebrate.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/celebrate.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/focus.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/focus.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/relax.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/relax.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/edge-left.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/edge-left.json"
+        )),
+    ),
+    (
+        "characters/shadow-crow-ninja/animations/edge-right.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/characters/shadow-crow-ninja/animations/edge-right.json"
+        )),
+    ),
+    (
+        "actions/shadow-crow-office/manifest.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/actions/shadow-crow-office/manifest.json"
+        )),
+    ),
+    (
+        "actions/shadow-crow-office/animations/thinking.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/actions/shadow-crow-office/animations/thinking.json"
+        )),
+    ),
+    (
+        "actions/shadow-crow-office/atlases/office.png",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/actions/shadow-crow-office/atlases/office.png"
+        )),
+    ),
+];
+pub fn seed_defaults(root: &Path) -> Result<()> {
+    for (rel, bytes) in FILES {
+        let path = root.join(rel);
+        if path.exists() {
+            continue;
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?
+        }
+        let temp = path.with_extension("seed.tmp");
+        fs::write(&temp, bytes)?;
+        fs::rename(temp, path)?;
+    }
+    Ok(())
+}

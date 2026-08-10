@@ -11,7 +11,7 @@ pub fn expand_frames(segments: &AnimationSegments, play_mode: &PlayMode) -> Vec<
     let main_loop = segments
         .main_loop
         .as_ref()
-        .map(expand_once)
+        .map(expand_repeated)
         .unwrap_or_default();
     let exit = segments
         .exit
@@ -25,14 +25,20 @@ pub fn expand_frames(segments: &AnimationSegments, play_mode: &PlayMode) -> Vec<
             frames.extend(main_loop);
             frames.extend(exit);
         }
-        PlayMode::Loop | PlayMode::HoldLast => frames.extend(main_loop),
+        PlayMode::Loop | PlayMode::HoldLast => {
+            frames.extend(main_loop);
+            frames.extend(exit);
+        }
         PlayMode::PingPong => {
             frames.extend(main_loop.iter().copied());
             frames.extend(main_loop.into_iter().rev());
+            frames.extend(exit);
         }
         PlayMode::ReverseReturn => {
             frames.extend(main_loop);
-            frames.extend(entry.into_iter().rev());
+            frames.extend(exit);
+            let reverse = frames.clone().into_iter().rev().collect::<Vec<_>>();
+            frames.extend(reverse);
         }
     }
     frames
@@ -149,5 +155,26 @@ mod tests {
         };
 
         assert_eq!(expand_frames(&segments, &PlayMode::Once), vec![7; 100]);
+    }
+
+    #[test]
+    fn reverse_return_plays_the_complete_path_backwards() {
+        let segments = AnimationSegments {
+            entry: Some(Segment {
+                start: 0,
+                end: 1,
+                repeat: 1,
+            }),
+            main_loop: Some(Segment {
+                start: 2,
+                end: 3,
+                repeat: 1,
+            }),
+            exit: None,
+        };
+        assert_eq!(
+            expand_frames(&segments, &PlayMode::ReverseReturn),
+            vec![0, 1, 2, 3, 3, 2, 1, 0]
+        );
     }
 }

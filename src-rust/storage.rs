@@ -265,6 +265,14 @@ impl Store {
                 remaining_seconds: remaining,
                 running: status == 0 || status == 1,
                 paused: status == 1,
+                deadline_epoch_ms: if status == 0 {
+                    DateTime::parse_from_rfc3339(&expected)
+                        .ok()
+                        .map(|x| x.timestamp_millis())
+                } else {
+                    None
+                },
+                completion_emitted: status == 3,
             })
         });
         match result {
@@ -300,10 +308,14 @@ impl Store {
 }
 
 pub fn load_settings(path: &Path) -> AppSettings {
-    fs::read_to_string(path)
+    let mut settings: AppSettings = fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    settings.pet_scale = settings.pet_scale.clamp(0.75, 1.4);
+    settings.interaction_cooldown_seconds = settings.interaction_cooldown_seconds.clamp(10, 120);
+    settings.pointer_near_distance_px = settings.pointer_near_distance_px.clamp(60, 240);
+    settings
 }
 
 pub fn save_settings(path: &Path, settings: &AppSettings) -> Result<()> {

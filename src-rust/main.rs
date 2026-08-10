@@ -1,13 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod animation;
-mod behavior;
-mod model;
-mod package_runtime;
-mod packages;
-mod platform;
-mod storage;
-
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -16,9 +8,18 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveDateTime, TimeZone, Timelike};
-use model::{AppSettings, PomodoroPhase, PomodoroState};
+use offline_companion::{
+    app_runtime::{AppRuntime, BusinessFact, RuntimeUpdate},
+    behavior::{
+        self,
+        event::PetEvent,
+        locomotion::{self, ReleasePath},
+    },
+    model::{AppSettings, PomodoroPhase, PomodoroState},
+    package_runtime, packages, platform,
+    storage::{self, AppPaths, Store},
+};
 use slint::{ComponentHandle, ModelRc, PhysicalPosition, Timer, TimerMode, VecModel};
-use storage::{AppPaths, Store};
 
 slint::include_modules!();
 
@@ -32,8 +33,24 @@ struct PetMotion {
     message: String,
 }
 
+struct ReleaseMotion {
+    x: f32,
+    y: f32,
+    velocity_x: f32,
+    velocity_y: f32,
+    last_tick: Instant,
+    area: platform::WorkArea,
+    width: u32,
+    height: u32,
+}
+
 type AlertPresenter = Rc<dyn Fn(String)>;
 type CancelMotion = Rc<dyn Fn()>;
+#[derive(Clone)]
+struct PetRuntimeBinding {
+    pet: slint::Weak<PetWindow>,
+    runtime: Rc<RefCell<AppRuntime>>,
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -47,8 +64,14 @@ fn main() {
 
 fn run() -> Result<()> {
     let paths = Rc::new(AppPaths::discover()?);
+    package_runtime::seeder::seed_defaults(&paths.root)?;
     let store = Rc::new(Store::open(&paths.database)?);
     let settings = Rc::new(RefCell::new(storage::load_settings(&paths.settings)));
+    let runtime = Rc::new(RefCell::new(AppRuntime::new(
+        &paths.characters,
+        &paths.actions,
+        &settings.borrow(),
+    )));
     let pomodoro = Rc::new(RefCell::new(store.load_pomodoro()?.unwrap_or_default()));
     let active_todo = Rc::new(RefCell::new(String::new()));
     let notification_message = Rc::new(RefCell::new(String::new()));
@@ -75,6 +98,12 @@ fn run() -> Result<()> {
     );
     apply_settings_to_pet(&pet, &settings.borrow());
     restore_pet_position(&pet, &settings.borrow());
+    if let Some(update) = runtime
+        .borrow_mut()
+        .dispatch(PetEvent::AppStarted, monotonic_ms())?
+    {
+        apply_runtime_update(&pet, &update);
+    }
     refresh_todos(&todos, &store, false);
 
     wire_basic_windows(
@@ -88,6 +117,10 @@ fn run() -> Result<()> {
     wire_todos(
         &todos,
         &timer_window,
+        PetRuntimeBinding {
+            pet: pet.as_weak(),
+            runtime: runtime.clone(),
+        },
         store.clone(),
         pomodoro.clone(),
         active_todo.clone(),
@@ -103,6 +136,7 @@ fn run() -> Result<()> {
         active_todo.clone(),
         store.clone(),
         pomodoro_five_minute_notified.clone(),
+        runtime.clone(),
     );
     wire_settings(
         &settings_window,
@@ -114,45 +148,114 @@ fn run() -> Result<()> {
         &notification,
         settings.clone(),
         paths.clone(),
+        runtime.clone(),
     );
-    wire_packages(&package_window, paths.clone());
-    wire_notification(&notification, notification_message.clone(), store.clone());
-    let animation_sequence = Rc::new(RefCell::new(Vec::<i32>::new()));
-    let animation_index = Rc::new(RefCell::new(0usize));
+    wire_packages(&package_window, paths.clone(), runtime.clone());
+    wire_notification(
+        &notification,
+        notification_message.clone(),
+        store.clone(),
+        PetRuntimeBinding {
+            pet: pet.as_weak(),
+            runtime: runtime.clone(),
+        },
+    );
     {
-        let sequences = animation_sequence.clone();
-        let index = animation_index.clone();
         let suppress_next_pet_click = suppress_next_pet_click.clone();
-        pet.on_pet_clicked(move || {
+        let runtime = runtime.clone();
+        let weak_pet = pet.as_weak();
+        pet.on_pet_clicked(move |y| {
             if std::mem::take(&mut *suppress_next_pet_click.borrow_mut()) {
                 return;
             }
-            *sequences.borrow_mut() = vec![4, 5, 3];
-            *index.borrow_mut() = 0;
+            if let Some(pet) = weak_pet.upgrade() {
+                let region = behavior::event::hit_region(y, pet.window().size().height as f32);
+                if let Ok(Some(update)) = runtime.borrow_mut().dispatch(
+                    PetEvent::PetClicked {
+                        region,
+                        click_count: 1,
+                    },
+                    monotonic_ms(),
+                ) {
+                    apply_runtime_update(&pet, &update);
+                }
+            }
+        });
+    }
+    {
+        let runtime = runtime.clone();
+        let weak_pet = pet.as_weak();
+        pet.on_hover_changed(move |hover| {
+            if let Some(pet) = weak_pet.upgrade() {
+                dispatch_runtime(
+                    &runtime,
+                    &pet,
+                    if hover {
+                        PetEvent::PointerNear { distance_px: 0.0 }
+                    } else {
+                        PetEvent::PointerExited
+                    },
+                );
+            }
+        });
+    }
+
+    let pointer_near_timer = Timer::default();
+    {
+        let runtime = runtime.clone();
+        let weak_pet = pet.as_weak();
+        let settings = settings.clone();
+        let was_near = Rc::new(RefCell::new(false));
+        pointer_near_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
+            let (Some(pet), Some((x, y))) = (weak_pet.upgrade(), platform::cursor_position())
+            else {
+                return;
+            };
+            let p = pet.window().position();
+            let s = pet.window().size();
+            let dx = if x < p.x {
+                p.x - x
+            } else if x > p.x + s.width as i32 {
+                x - (p.x + s.width as i32)
+            } else {
+                0
+            };
+            let dy = if y < p.y {
+                p.y - y
+            } else if y > p.y + s.height as i32 {
+                y - (p.y + s.height as i32)
+            } else {
+                0
+            };
+            let distance = (dx as f32).hypot(dy as f32);
+            let near = distance <= settings.borrow().pointer_near_distance_px as f32;
+            if near != *was_near.borrow() {
+                *was_near.borrow_mut() = near;
+                dispatch_runtime(
+                    &runtime,
+                    &pet,
+                    if near {
+                        PetEvent::PointerNear {
+                            distance_px: distance,
+                        }
+                    } else {
+                        PetEvent::PointerExited
+                    },
+                );
+            }
         });
     }
 
     let animation_timer = Timer::default();
     {
         let weak_pet = pet.as_weak();
-        let sequences = animation_sequence.clone();
-        let index = animation_index.clone();
-        animation_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
+        let runtime = runtime.clone();
+        animation_timer.start(TimerMode::Repeated, Duration::from_millis(25), move || {
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
-            let sequence = sequences.borrow();
-            if sequence.is_empty() {
-                return;
-            }
-            let mut position = index.borrow_mut();
-            pet.set_frame_index(sequence[*position]);
-            *position += 1;
-            if *position >= sequence.len() {
-                drop(position);
-                drop(sequence);
-                sequences.borrow_mut().clear();
-                *index.borrow_mut() = 0;
+            if let Ok(Some(update)) = runtime.borrow_mut().tick(monotonic_ms()) {
+                apply_runtime_update(&pet, &update);
             }
         });
     }
@@ -162,7 +265,6 @@ fn run() -> Result<()> {
         &notification,
         settings.clone(),
         notification_message.clone(),
-        animation_sequence.clone(),
     );
     wire_pet_drag(
         &pet,
@@ -170,12 +272,15 @@ fn run() -> Result<()> {
         paths.clone(),
         suppress_next_pet_click.clone(),
         cancel_pet_motion,
+        runtime.clone(),
     );
 
     let scheduler_timer = Timer::default();
     {
         let store = store.clone();
         let present_alert = present_alert.clone();
+        let runtime = runtime.clone();
+        let weak_pet = pet.as_weak();
         let weak_reminder = reminder.as_weak();
         scheduler_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
             let Ok(due) = store.take_due_reminders(Local::now()) else {
@@ -194,6 +299,17 @@ fn run() -> Result<()> {
             if let Some(window) = weak_reminder.upgrade() {
                 refresh_reminders(&window, &store);
             }
+            if let Some(pet) = weak_pet.upgrade() {
+                let id = due.first().map(|x| x.id.clone()).unwrap_or_default();
+                dispatch_fact_runtime(
+                    &runtime,
+                    &pet,
+                    BusinessFact::ReminderDue {
+                        kind: behavior::event::ReminderKind::Default,
+                        id,
+                    },
+                );
+            }
             present_alert(text);
         });
     }
@@ -204,12 +320,14 @@ fn run() -> Result<()> {
         let weak_timer = timer_window.as_weak();
         let five_minute_notified = pomodoro_five_minute_notified.clone();
         let present_alert = present_alert.clone();
+        let runtime = runtime.clone();
+        let weak_pet = pet.as_weak();
         pomodoro_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
             let mut state = state.borrow_mut();
             if !state.running || state.paused {
                 return;
             }
-            state.remaining_seconds = state.remaining_seconds.saturating_sub(1);
+            let completed = state.update_at(Local::now().timestamp_millis());
             if let Some(timer) = weak_timer.upgrade() {
                 update_timer_view(&timer, &state, "");
             }
@@ -222,7 +340,7 @@ fn run() -> Result<()> {
                 let text = "当前番茄时钟还剩5分钟";
                 present_alert(text.into());
             }
-            if state.remaining_seconds > 0 {
+            if !completed {
                 return;
             }
             let text = if state.phase == PomodoroPhase::Focus {
@@ -243,6 +361,9 @@ fn run() -> Result<()> {
             };
             *five_minute_notified.borrow_mut() = false;
             let _ = store.save_pomodoro(&state);
+            if let Some(pet) = weak_pet.upgrade() {
+                dispatch_fact_runtime(&runtime, &pet, BusinessFact::PomodoroCompleted);
+            }
             present_alert(text.into());
         });
     }
@@ -252,6 +373,8 @@ fn run() -> Result<()> {
         let settings = settings.clone();
         let present_alert = present_alert.clone();
         let active_seconds = Rc::new(RefCell::new(0u64));
+        let runtime = runtime.clone();
+        let weak_pet = pet.as_weak();
         sedentary_timer.start(TimerMode::Repeated, Duration::from_secs(60), move || {
             let idle = platform::idle_millis();
             let mut active = active_seconds.borrow_mut();
@@ -265,6 +388,9 @@ fn run() -> Result<()> {
             }
             *active = 0;
             let text = "已经专注很久了，起来活动一下吧";
+            if let Some(pet) = weak_pet.upgrade() {
+                dispatch_fact_runtime(&runtime, &pet, BusinessFact::SedentaryWarning);
+            }
             present_alert(text.into());
         });
     }
@@ -404,6 +530,7 @@ fn wire_basic_windows(
 fn wire_todos(
     todo_window: &TodoWindow,
     timer: &TimerWindow,
+    pet_runtime: PetRuntimeBinding,
     store: Rc<Store>,
     state: Rc<RefCell<PomodoroState>>,
     active_todo: Rc<RefCell<String>>,
@@ -428,12 +555,21 @@ fn wire_todos(
     {
         let weak = todo_window.as_weak();
         let store = store.clone();
+        let runtime = pet_runtime.runtime.clone();
+        let weak_pet = pet_runtime.pet.clone();
         todo_window.on_toggle_todo(move |id| {
             if let Some(window) = weak.upgrade()
                 && let Ok(completed) = store.toggle_todo(&id)
             {
                 if completed {
                     window.set_status_text("完成啦，鸦影在为你庆祝！".into());
+                    if let Some(pet) = weak_pet.upgrade() {
+                        dispatch_fact_runtime(
+                            &runtime,
+                            &pet,
+                            BusinessFact::TodoCompleted { id: id.to_string() },
+                        );
+                    }
                 }
                 refresh_todos(&window, &store, window.get_include_completed());
             }
@@ -462,14 +598,14 @@ fn wire_todos(
     {
         let weak_timer = timer.as_weak();
         let weak_todos = todo_window.as_weak();
+        let runtime = pet_runtime.runtime.clone();
+        let weak_pet = pet_runtime.pet.clone();
         todo_window.on_start_focus(move |title| {
             *active_todo.borrow_mut() = title.to_string();
             *five_minute_notified.borrow_mut() = false;
             let mut state = state.borrow_mut();
-            *state = PomodoroState {
-                running: true,
-                ..PomodoroState::default()
-            };
+            *state = PomodoroState::default();
+            state.start_at(Local::now().timestamp_millis());
             let _ = store.save_pomodoro(&state);
             if let Some(timer) = weak_timer.upgrade() {
                 timer.set_active_todo(title);
@@ -478,6 +614,9 @@ fn wire_todos(
             }
             if let Some(todos) = weak_todos.upgrade() {
                 let _ = todos.hide();
+            }
+            if let Some(pet) = weak_pet.upgrade() {
+                dispatch_fact_runtime(&runtime, &pet, BusinessFact::PomodoroStarted);
             }
         });
     }
@@ -533,6 +672,7 @@ fn wire_timer(
     active_todo: Rc<RefCell<String>>,
     store: Rc<Store>,
     five_minute_notified: Rc<RefCell<bool>>,
+    runtime: Rc<RefCell<AppRuntime>>,
 ) {
     {
         let weak = window.as_weak();
@@ -541,18 +681,18 @@ fn wire_timer(
         let weak_pet = pet.as_weak();
         let store = store.clone();
         let five_minute_notified = five_minute_notified.clone();
+        let runtime = runtime.clone();
         window.on_start(move || {
             *five_minute_notified.borrow_mut() = false;
             let mut state = state.borrow_mut();
-            state.running = true;
-            state.paused = false;
+            state.start_at(Local::now().timestamp_millis());
             let _ = store.save_pomodoro(&state);
             if let Some(window) = weak.upgrade() {
                 update_timer_view(&window, &state, &active_todo.borrow());
                 let _ = window.hide();
             }
             if let Some(pet) = weak_pet.upgrade() {
-                pet.set_frame_index(1);
+                dispatch_fact_runtime(&runtime, &pet, BusinessFact::PomodoroStarted);
             }
         });
     }
@@ -561,14 +701,31 @@ fn wire_timer(
         let state = state.clone();
         let active_todo = active_todo.clone();
         let store = store.clone();
+        let runtime = runtime.clone();
+        let weak_pet = pet.as_weak();
         window.on_toggle_pause(move || {
             let mut state = state.borrow_mut();
             if state.running {
-                state.paused = !state.paused;
+                if state.paused {
+                    state.resume_at(Local::now().timestamp_millis())
+                } else {
+                    state.pause_at(Local::now().timestamp_millis())
+                }
             }
             let _ = store.save_pomodoro(&state);
             if let Some(window) = weak.upgrade() {
                 update_timer_view(&window, &state, &active_todo.borrow());
+            }
+            if let Some(pet) = weak_pet.upgrade() {
+                dispatch_fact_runtime(
+                    &runtime,
+                    &pet,
+                    if state.paused {
+                        BusinessFact::PomodoroPaused
+                    } else {
+                        BusinessFact::PomodoroStarted
+                    },
+                );
             }
         });
     }
@@ -599,6 +756,7 @@ fn wire_settings(
     notification: &NotificationWindow,
     settings: Rc<RefCell<AppSettings>>,
     paths: Rc<AppPaths>,
+    runtime: Rc<RefCell<AppRuntime>>,
 ) {
     let initial = settings.borrow().clone();
     window.set_scale_value(initial.pet_scale);
@@ -607,6 +765,9 @@ fn wire_settings(
     window.set_reduce_motion_value(initial.reduce_motion);
     window.set_theme_index(if initial.theme == "light" { 1 } else { 0 });
     window.set_sedentary_minutes(initial.sedentary_minutes as i32);
+    window.set_proactive_invitation(initial.allow_proactive_invitation);
+    window.set_interaction_cooldown(initial.interaction_cooldown_seconds as i32);
+    window.set_pointer_near_distance(initial.pointer_near_distance_px as i32);
     let weak_window = window.as_weak();
     let weak_pet = pet.as_weak();
     let weak_todos = todos.as_weak();
@@ -615,7 +776,15 @@ fn wire_settings(
     let weak_packages = packages.as_weak();
     let weak_notification = notification.as_weak();
     window.on_save(
-        move |scale, topmost, idle, reduce_motion, theme_index, sedentary| {
+        move |scale,
+              topmost,
+              idle,
+              reduce_motion,
+              theme_index,
+              sedentary,
+              proactive,
+              cooldown,
+              near_distance| {
             let mut value = settings.borrow_mut();
             value.pet_scale = scale.clamp(0.75, 1.4);
             value.topmost = topmost;
@@ -623,9 +792,20 @@ fn wire_settings(
             value.reduce_motion = reduce_motion;
             value.theme = if theme_index == 1 { "light" } else { "dark" }.into();
             value.sedentary_minutes = sedentary.clamp(30, 120) as u32;
+            value.allow_proactive_invitation = proactive;
+            value.interaction_cooldown_seconds = cooldown.clamp(10, 120) as u64;
+            value.pointer_near_distance_px = near_distance.clamp(60, 240) as u32;
+            {
+                let mut runtime = runtime.borrow_mut();
+                runtime.behavior.proactive_enabled = proactive;
+                runtime.behavior.reduce_motion = reduce_motion;
+                runtime.behavior.interaction_cooldown_ms =
+                    value.interaction_cooldown_seconds * 1000;
+            }
             let _ = storage::save_settings(&paths.settings, &value);
             if let Some(pet) = weak_pet.upgrade() {
                 apply_settings_to_pet(&pet, &value);
+                clamp_pet_to_work_area(&pet);
                 pet.global::<Theme>().set_light(theme_index == 1);
             }
             if let Some(component) = weak_todos.upgrade() {
@@ -653,7 +833,8 @@ fn wire_settings(
     );
 }
 
-fn wire_packages(window: &PackageWindow, paths: Rc<AppPaths>) {
+fn wire_packages(window: &PackageWindow, paths: Rc<AppPaths>, runtime: Rc<RefCell<AppRuntime>>) {
+    refresh_packages(window, &runtime.borrow());
     let weak = window.as_weak();
     window.on_import_package(move || {
         let Some(window) = weak.upgrade() else { return };
@@ -664,20 +845,66 @@ fn wire_packages(window: &PackageWindow, paths: Rc<AppPaths>) {
             return;
         };
         match packages::install_package(&path, &paths.characters, &paths.actions) {
-            Ok(status) => window.set_status_text(status.into()),
+            Ok(status) => {
+                runtime
+                    .borrow_mut()
+                    .reload(&paths.characters, &paths.actions);
+                refresh_packages(&window, &runtime.borrow());
+                window.set_status_text(status.into())
+            }
             Err(error) => window.set_status_text(format!("导入失败：{error}").into()),
         }
     });
 }
 
-fn wire_notification(window: &NotificationWindow, message: Rc<RefCell<String>>, store: Rc<Store>) {
+fn refresh_packages(window: &PackageWindow, runtime: &AppRuntime) {
+    let mut rows = Vec::new();
+    for p in runtime.catalog().characters.values() {
+        rows.push(PackageRow {
+            id: p.manifest.id.clone().into(),
+            name: p.manifest.name.clone().into(),
+            version: p.manifest.version.clone().into(),
+            kind: "角色".into(),
+        });
+    }
+    for p in runtime.catalog().actions.values() {
+        rows.push(PackageRow {
+            id: p.manifest.id.clone().into(),
+            name: p.manifest.name.clone().into(),
+            version: p.manifest.version.clone().into(),
+            kind: "动作包".into(),
+        });
+    }
+    window.set_package_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+fn wire_notification(
+    window: &NotificationWindow,
+    message: Rc<RefCell<String>>,
+    store: Rc<Store>,
+    pet_runtime: PetRuntimeBinding,
+) {
     let weak = window.as_weak();
+    let runtime = pet_runtime.runtime.clone();
+    let weak_pet = pet_runtime.pet.clone();
     window.on_dismiss(move || {
         if let Some(window) = weak.upgrade() {
             let _ = window.hide();
         }
+        if let Some(pet) = weak_pet.upgrade() {
+            dispatch_fact_runtime(
+                &runtime,
+                &pet,
+                BusinessFact::ReminderHandled {
+                    kind: behavior::event::ReminderKind::Default,
+                    id: "notification".into(),
+                },
+            );
+        }
     });
     let weak = window.as_weak();
+    let runtime = pet_runtime.runtime;
+    let weak_pet = pet_runtime.pet;
     window.on_snooze(move || {
         let _ = store.add_reminder(
             &message.borrow(),
@@ -685,6 +912,16 @@ fn wire_notification(window: &NotificationWindow, message: Rc<RefCell<String>>, 
         );
         if let Some(window) = weak.upgrade() {
             let _ = window.hide();
+        }
+        if let Some(pet) = weak_pet.upgrade() {
+            dispatch_fact_runtime(
+                &runtime,
+                &pet,
+                BusinessFact::ReminderHandled {
+                    kind: behavior::event::ReminderKind::Default,
+                    id: "snoozed".into(),
+                },
+            );
         }
     });
 }
@@ -695,16 +932,66 @@ fn wire_pet_drag(
     paths: Rc<AppPaths>,
     suppress_next_click: Rc<RefCell<bool>>,
     cancel_motion: CancelMotion,
+    runtime: Rc<RefCell<AppRuntime>>,
 ) {
-    let drag_origin = Rc::new(RefCell::new(None::<(i32, i32)>));
+    let drag_origin = Rc::new(RefCell::new(None::<(i32, i32, Instant)>));
+    let drag_sample = Rc::new(RefCell::new(None::<(Instant, f32, f32)>));
+    let release_motion = Rc::new(RefCell::new(None::<ReleaseMotion>));
+    let release_timer = Rc::new(Timer::default());
+    {
+        let weak = pet.as_weak();
+        let release_motion = release_motion.clone();
+        let weak_timer = Rc::downgrade(&release_timer);
+        release_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
+            let Some(pet) = weak.upgrade() else { return };
+            let mut motion = release_motion.borrow_mut();
+            let Some(state) = motion.as_mut() else { return };
+            let elapsed = state.last_tick.elapsed().as_secs_f32().clamp(0.001, 0.05);
+            state.last_tick = Instant::now();
+            state.velocity_y += 1800.0 * elapsed;
+            state.x += state.velocity_x * elapsed;
+            state.y += state.velocity_y * elapsed;
+            state.velocity_x *= 0.985;
+            let (x, y) = locomotion::clamp_to_work_area(
+                state.x.round() as i32,
+                state.y.round() as i32,
+                state.width,
+                state.height,
+                state.area,
+            );
+            pet.window().set_position(PhysicalPosition::new(x, y));
+            if y >= state.area.bottom - state.height as i32 {
+                motion.take();
+                if let Some(timer) = weak_timer.upgrade() {
+                    timer.stop();
+                }
+            }
+        });
+        release_timer.stop();
+    }
     {
         let weak = pet.as_weak();
         let drag_origin = drag_origin.clone();
-        pet.on_drag_start(move |_, _| {
+        let runtime = runtime.clone();
+        let drag_sample = drag_sample.clone();
+        let release_motion = release_motion.clone();
+        let release_timer = release_timer.clone();
+        pet.on_drag_start(move |x, y| {
             cancel_motion();
             let Some(pet) = weak.upgrade() else { return };
             let position = pet.window().position();
-            *drag_origin.borrow_mut() = Some((position.x, position.y));
+            release_motion.borrow_mut().take();
+            release_timer.stop();
+            *drag_origin.borrow_mut() = Some((position.x, position.y, Instant::now()));
+            *drag_sample.borrow_mut() = Some((Instant::now(), x, y));
+            dispatch_runtime(
+                &runtime,
+                &pet,
+                PetEvent::DragStarted {
+                    pointer_x: x,
+                    pointer_y: y,
+                },
+            );
             if !platform::begin_window_drag(pet.window()) {
                 drag_origin.borrow_mut().take();
             }
@@ -712,12 +999,86 @@ fn wire_pet_drag(
     }
     {
         let weak = pet.as_weak();
+        let runtime = runtime.clone();
+        let drag_sample = drag_sample.clone();
+        pet.on_drag_move(move |x, y| {
+            let Some(pet) = weak.upgrade() else { return };
+            let mut sample = drag_sample.borrow_mut();
+            let Some((at, px, py)) = *sample else { return };
+            let seconds = at.elapsed().as_secs_f32().max(0.001);
+            dispatch_runtime(
+                &runtime,
+                &pet,
+                PetEvent::DragMoved {
+                    dx: x - px,
+                    dy: y - py,
+                    velocity_x: (x - px) / seconds,
+                    velocity_y: (y - py) / seconds,
+                },
+            );
+            *sample = Some((Instant::now(), x, y));
+        });
+    }
+    {
+        let weak = pet.as_weak();
+        let runtime = runtime.clone();
+        let drag_sample = drag_sample.clone();
+        let release_motion = release_motion.clone();
+        let release_timer = release_timer.clone();
         pet.on_drag_end(move || {
-            let Some((origin_x, origin_y)) = drag_origin.borrow_mut().take() else {
+            let Some((origin_x, origin_y, started)) = drag_origin.borrow_mut().take() else {
                 return;
             };
             let Some(pet) = weak.upgrade() else { return };
             let position = pet.window().position();
+            drag_sample.borrow_mut().take();
+            let seconds = started.elapsed().as_secs_f32().max(0.05);
+            let velocity_x = (position.x - origin_x) as f32 / seconds;
+            let velocity_y = (position.y - origin_y) as f32 / seconds;
+            dispatch_runtime(
+                &runtime,
+                &pet,
+                PetEvent::DragReleased {
+                    velocity_x,
+                    velocity_y,
+                    x: position.x,
+                    y: position.y,
+                },
+            );
+            let area = platform::active_work_area(pet.window());
+            let size = pet.window().size();
+            let path =
+                locomotion::release_path(velocity_x, velocity_y, position.x, size.width, area);
+            if settings.borrow().reduce_motion {
+                let (x, y) = locomotion::clamp_to_work_area(
+                    position.x,
+                    position.y,
+                    size.width,
+                    size.height,
+                    area,
+                );
+                pet.window().set_position(PhysicalPosition::new(x, y));
+            } else if path != ReleasePath::Edge {
+                *release_motion.borrow_mut() = Some(ReleaseMotion {
+                    x: position.x as f32,
+                    y: position.y as f32,
+                    velocity_x: if path == ReleasePath::Thrown {
+                        velocity_x
+                    } else {
+                        0.0
+                    },
+                    velocity_y: if path == ReleasePath::Thrown {
+                        velocity_y
+                    } else {
+                        80.0
+                    },
+                    last_tick: Instant::now(),
+                    area,
+                    width: size.width,
+                    height: size.height,
+                });
+                release_timer.restart();
+            }
             if position.x == origin_x && position.y == origin_y {
                 return;
             }
@@ -849,7 +1210,7 @@ fn update_timer_view(window: &TimerWindow, state: &PomodoroState, todo: &str) {
 }
 
 fn apply_settings_to_pet(pet: &PetWindow, settings: &AppSettings) {
-    pet.set_pet_scale(settings.pet_scale);
+    pet.set_pet_scale(settings.pet_scale.clamp(0.75, 1.4));
     pet.set_topmost_enabled(settings.topmost);
     pet.set_reduce_motion(settings.reduce_motion);
 }
@@ -876,12 +1237,35 @@ fn apply_theme(
 
 fn restore_pet_position(pet: &PetWindow, settings: &AppSettings) {
     if let (Some(x), Some(y)) = (settings.pet_left, settings.pet_top) {
+        let area = platform::active_work_area(pet.window());
+        let scale = settings.pet_scale.clamp(0.75, 1.4);
+        let (x, y) = offline_companion::behavior::locomotion::clamp_to_work_area(
+            x,
+            y,
+            (250.0 * scale) as u32,
+            (330.0 * scale) as u32,
+            area,
+        );
         pet.window().set_position(PhysicalPosition::new(x, y));
     } else {
         let area = platform::active_work_area(pet.window());
         pet.window()
             .set_position(PhysicalPosition::new(area.right - 290, area.bottom - 370));
     }
+}
+
+fn clamp_pet_to_work_area(pet: &PetWindow) {
+    let position = pet.window().position();
+    let scale = pet.get_pet_scale().clamp(0.75, 1.4);
+    let area = platform::active_work_area(pet.window());
+    let (x, y) = offline_companion::behavior::locomotion::clamp_to_work_area(
+        position.x,
+        position.y,
+        (250.0 * scale) as u32,
+        (330.0 * scale) as u32,
+        area,
+    );
+    pet.window().set_position(PhysicalPosition::new(x, y));
 }
 
 fn center_window_on_active_monitor(
@@ -915,12 +1299,43 @@ fn smoothstep(progress: f32) -> f32 {
     progress * progress * (3.0 - 2.0 * progress)
 }
 
+fn monotonic_ms() -> u64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+fn apply_runtime_update(pet: &PetWindow, update: &RuntimeUpdate) {
+    if let Ok(image) = slint::Image::load_from_path(&update.render.atlas) {
+        pet.set_atlas_image(image);
+    }
+    pet.set_frame_width(update.render.frame_width as i32);
+    pet.set_frame_height(update.render.frame_height as i32);
+    pet.set_atlas_columns(update.render.columns as i32);
+    pet.set_mirror_x(update.render.mirror_x);
+    pet.set_frame_index(update.render.frame_index as i32);
+    let _ = &update.action_id;
+    if update.completed {
+        pet.set_frame_index(update.render.frame_index as i32);
+    }
+}
+
+fn dispatch_runtime(runtime: &Rc<RefCell<AppRuntime>>, pet: &PetWindow, event: PetEvent) {
+    if let Ok(Some(update)) = runtime.borrow_mut().dispatch(event, monotonic_ms()) {
+        apply_runtime_update(pet, &update)
+    }
+}
+
+fn dispatch_fact_runtime(runtime: &Rc<RefCell<AppRuntime>>, pet: &PetWindow, fact: BusinessFact) {
+    if let Ok(Some(update)) = runtime.borrow_mut().dispatch_fact(fact, monotonic_ms()) {
+        apply_runtime_update(pet, &update)
+    }
+}
+
 fn create_alert_presenter(
     pet: &PetWindow,
     notification: &NotificationWindow,
     settings: Rc<RefCell<AppSettings>>,
     notification_message: Rc<RefCell<String>>,
-    animation_sequence: Rc<RefCell<Vec<i32>>>,
 ) -> (AlertPresenter, CancelMotion) {
     let motion = Rc::new(RefCell::new(None::<PetMotion>));
     let motion_timer = Rc::new(Timer::default());
@@ -930,9 +1345,8 @@ fn create_alert_presenter(
         let motion = motion.clone();
         let weak_timer = Rc::downgrade(&motion_timer);
         let notification_message = notification_message.clone();
-        let animation_sequence = animation_sequence.clone();
         motion_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
-            let (x, y, walking_frame, completed, text) = {
+            let (x, y, completed, text) = {
                 let motion = motion.borrow();
                 let Some(state) = motion.as_ref() else { return };
                 let elapsed = state.started_at.elapsed();
@@ -942,18 +1356,12 @@ fn create_alert_presenter(
                     + ((state.target_x - state.start_x) as f32 * eased).round() as i32;
                 let y = state.start_y
                     + ((state.target_y - state.start_y) as f32 * eased).round() as i32;
-                let walking_frame = if (elapsed.as_millis() / 160).is_multiple_of(2) {
-                    0
-                } else {
-                    2
-                };
-                (x, y, walking_frame, progress >= 1.0, state.message.clone())
+                (x, y, progress >= 1.0, state.message.clone())
             };
             let Some(pet) = weak_pet.upgrade() else {
                 return;
             };
             pet.window().set_position(PhysicalPosition::new(x, y));
-            pet.set_frame_index(walking_frame);
             if !completed {
                 return;
             }
@@ -962,7 +1370,6 @@ fn create_alert_presenter(
                 timer.stop();
             }
             *notification_message.borrow_mut() = text.clone();
-            *animation_sequence.borrow_mut() = vec![6, 6, 6, 3];
             if let Some(notification) = weak_notification.upgrade() {
                 notification.set_message(text.into());
                 position_notification(&notification, &pet);
@@ -983,14 +1390,18 @@ fn create_alert_presenter(
         if let Some(notification) = weak_notification.upgrade() {
             let _ = notification.hide();
         }
-        animation_sequence.borrow_mut().clear();
-        pet.set_frame_index(0);
         let start = pet.window().position();
-        let (target_x, target_y) = platform::active_work_area(pet.window())
-            .center(pet.window().size().width, pet.window().size().height);
+        let move_for_reminder =
+            settings.borrow().reminder_follow_pet && !settings.borrow().reduce_motion;
+        let (target_x, target_y) = if move_for_reminder {
+            platform::active_work_area(pet.window())
+                .center(pet.window().size().width, pet.window().size().height)
+        } else {
+            (start.x, start.y)
+        };
         let distance = (((target_x - start.x).pow(2) + (target_y - start.y).pow(2)) as f32).sqrt();
-        let base_millis = if settings.borrow().reduce_motion {
-            550.0
+        let base_millis = if !move_for_reminder {
+            1.0
         } else {
             (750.0 + distance * 0.8).clamp(900.0, 1_800.0)
         };

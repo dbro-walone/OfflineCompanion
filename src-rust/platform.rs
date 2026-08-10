@@ -141,6 +141,18 @@ pub fn idle_millis() -> u64 {
 }
 
 #[cfg(windows)]
+pub fn cursor_position() -> Option<(i32, i32)> {
+    use windows::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
+    let mut point = POINT::default();
+    unsafe { GetCursorPos(&mut point).ok().map(|()| (point.x, point.y)) }
+}
+
+#[cfg(not(windows))]
+pub fn cursor_position() -> Option<(i32, i32)> {
+    None
+}
+
+#[cfg(windows)]
 pub fn begin_window_drag(window: &slint::Window) -> bool {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{

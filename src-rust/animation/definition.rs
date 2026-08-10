@@ -32,6 +32,12 @@ pub struct AnimationDefinition {
     pub segments: AnimationSegments,
 }
 
+impl AnimationDefinition {
+    pub fn frame_duration_ms(&self) -> u64 {
+        (1000.0 / self.fps.clamp(1.0, 120.0)).round() as u64
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnimationSegments {
@@ -51,6 +57,8 @@ pub struct Segment {
     #[serde(default)]
     pub repeat: u32,
 }
+
+pub type AnimationReference = AnimationDefinition;
 
 #[cfg(test)]
 mod tests {

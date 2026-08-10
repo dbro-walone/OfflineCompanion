@@ -57,7 +57,10 @@ pub fn install_package(zip_path: &Path, characters: &Path, actions: &Path) -> Re
 
     let manifest: Manifest =
         serde_json::from_str(&manifest_text.context("扩展包缺少 manifest.json")?)?;
-    anyhow::ensure!(manifest.schema_version == 1, "不支持的 Manifest 版本");
+    anyhow::ensure!(
+        (1..=2).contains(&manifest.schema_version),
+        "不支持的 Manifest 版本"
+    );
     semver::Version::parse(&manifest.version).context("扩展包版本号无效")?;
     anyhow::ensure!(
         manifest
@@ -94,10 +97,32 @@ pub fn install_package(zip_path: &Path, characters: &Path, actions: &Path) -> Re
             io::copy(&mut entry, &mut output)?;
         }
     }
-    if destination.exists() {
-        fs::remove_dir_all(&destination)?;
+    let installed_manifest =
+        crate::package_runtime::validator::load_manifest(&temporary.join("manifest.json"))?;
+    match installed_manifest {
+        crate::package_runtime::manifest::PackageManifest::Character(ref value) => {
+            crate::package_runtime::validator::validate_character(&temporary, value)?
+        }
+        crate::package_runtime::manifest::PackageManifest::Action(ref value) => {
+            crate::package_runtime::validator::validate_action_pack(&temporary, value)?
+        }
     }
-    fs::rename(&temporary, &destination)?;
+    let backup = base.join(format!(".backup-{}", manifest.id));
+    if backup.exists() {
+        fs::remove_dir_all(&backup)?;
+    }
+    if destination.exists() {
+        fs::rename(&destination, &backup)?;
+    }
+    if let Err(error) = fs::rename(&temporary, &destination) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, &destination);
+        }
+        return Err(error.into());
+    }
+    if backup.exists() {
+        fs::remove_dir_all(backup)?;
+    }
     Ok(format!("已安装 {} {}", manifest.id, manifest.version))
 }
 

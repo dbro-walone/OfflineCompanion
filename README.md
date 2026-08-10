@@ -14,7 +14,8 @@
 - 深色/浅色主题、75%～140% 缩放、置顶、减少动态效果和久坐阈值设置；
 - SQLite WAL 与兼容原 C# 版本的数据表，升级到 Rust 版本后保留本地待办、提醒和番茄记录；
 - 安全 ZIP 扩展包导入：拒绝路径穿越、绝对路径、未知文件类型及超限解压内容；
-- 默认角色图集编译进 EXE，运行不需要外置资源目录。
+- 默认角色与动作资源编译进程序，首次启动原子释放到本地目录；渲染器和管理页面均从动态资源目录读取。
+- 统一 `PetEvent` 行为运行时、优先级调度、4 秒互动会话、30 秒冷却、拖放物理反馈与减少动态效果降级。
 
 ## 技术与内存策略
 
@@ -43,7 +44,7 @@ target\x86_64-pc-windows-msvc\release\OfflineCompanion.exe
 
 ## GitHub Actions 成品
 
-每次推送到 `rust-rewrite` 分支会触发 `Build Rust Windows Release`。流水线执行格式检查、Clippy、测试和 Windows Release 编译，并上传：
+每次推送到 `rust-rewrite` 分支会触发 `Build Rust Desktop Releases`。流水线执行格式检查、严格 Clippy、测试，并分别构建 Windows x64 EXE 与 macOS Universal 应用。
 
 ```text
 OfflineCompanion-rust-win-x64/
@@ -51,7 +52,9 @@ OfflineCompanion-rust-win-x64/
   SHA256SUMS.txt
 ```
 
-从 GitHub 仓库的 **Actions → Build Rust Windows Release → Artifacts** 下载即可在 Windows 10/11 x64 使用。
+从 GitHub 仓库的 **Actions → Build Rust Desktop Releases → Artifacts** 下载对应平台产物即可使用。
+
+运行时架构、扩展包制作和验收说明见 `docs/pet-runtime-v1.md`、`docs/package-authoring-v1.md` 与 `docs/acceptance-pet-runtime-v1.md`。
 
 ## 数据目录
 

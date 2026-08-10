@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+pub use crate::animation::definition::AnimationReference;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,6 +106,27 @@ pub struct RenderInfo {
 pub struct ScaleRange {
     pub min: f64,
     pub max: f64,
+}
+
+#[derive(Debug, Clone)]
+pub enum PackageManifest {
+    Character(CharacterManifest),
+    Action(ActionPackManifest),
+}
+
+impl PackageManifest {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Character(x) => &x.id,
+            Self::Action(x) => &x.id,
+        }
+    }
+    pub fn version(&self) -> &str {
+        match self {
+            Self::Character(x) => &x.version,
+            Self::Action(x) => &x.version,
+        }
+    }
 }
 
 #[cfg(test)]
