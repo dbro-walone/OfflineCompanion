@@ -41,6 +41,10 @@ pub enum PetEvent {
         velocity_y: f32,
         x: i32,
         y: i32,
+        path: super::locomotion::ReleasePath,
+    },
+    Landing {
+        path: super::locomotion::ReleasePath,
     },
     ReminderRaised {
         kind: ReminderKind,
@@ -59,6 +63,9 @@ pub enum PetEvent {
     SedentaryWarning,
     UserActivityResumed,
     DisplayChanged,
+    ActionCompleted {
+        action_id: String,
+    },
     Tick {
         now_ms: u64,
     },

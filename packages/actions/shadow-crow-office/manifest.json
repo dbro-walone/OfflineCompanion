@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "packageType": "action",
   "id": "action.shadow-crow.office",
   "name": "鸦影·办公动作包",
@@ -12,6 +12,13 @@
     }
   ],
   "priority": 100,
+  "render": {
+    "atlas": "atlases/office.png",
+    "frameWidth": 384,
+    "frameHeight": 512,
+    "columns": 4,
+    "rows": 2
+  },
   "actions": [
     {
       "id": "idle.thinking",

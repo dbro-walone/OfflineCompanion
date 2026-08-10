@@ -50,6 +50,7 @@
               },
               "additionalProperties": false
             },
+            "render": { "$ref": "#/$defs/render" },
             "actions": {
               "type": "object",
               "required": ["idle"],
@@ -65,9 +66,16 @@
         {
           "type": "object",
           "required": ["compatibleCharacters", "actions"],
+          "allOf": [
+            {
+              "if": { "properties": { "schemaVersion": { "const": 2 } } },
+              "then": { "required": ["render"] }
+            }
+          ],
           "properties": {
             "packageType": { "const": "action" },
             "priority": { "type": "integer" },
+            "render": { "$ref": "#/$defs/actionRender" },
             "compatibleCharacters": {
               "type": "array",
               "minItems": 1,
@@ -89,9 +97,12 @@
                 "required": ["id", "trigger", "animation"],
                 "properties": {
                   "id": { "type": "string", "minLength": 1 },
+                  "semantic": { "type": "string", "minLength": 1 },
                   "trigger": { "type": "string", "minLength": 1 },
                   "weight": { "type": "integer", "minimum": 1 },
                   "cooldownSeconds": { "type": "integer", "minimum": 0 },
+                  "priority": { "type": "integer", "minimum": 0, "maximum": 255 },
+                  "interruptible": { "type": "boolean" },
                   "animation": { "$ref": "#/$defs/relativePath" }
                 },
                 "additionalProperties": false
@@ -99,6 +110,35 @@
             }
           }
         }
+      ]
+    },
+    "render": {
+      "type": "object",
+      "required": ["frameWidth", "frameHeight"],
+      "properties": {
+        "defaultAtlas": { "$ref": "#/$defs/relativePath" },
+        "atlas": { "$ref": "#/$defs/relativePath" },
+        "frameWidth": { "type": "integer", "minimum": 1 },
+        "frameHeight": { "type": "integer", "minimum": 1 },
+        "columns": { "type": "integer", "minimum": 1 },
+        "rows": { "type": "integer", "minimum": 1 },
+        "defaultScale": { "type": "number", "exclusiveMinimum": 0 },
+        "scaleRange": {
+          "type": "object",
+          "required": ["min", "max"],
+          "properties": {
+            "min": { "type": "number", "exclusiveMinimum": 0 },
+            "max": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "actionRender": {
+      "allOf": [
+        { "$ref": "#/$defs/render" },
+        { "required": ["atlas", "frameWidth", "frameHeight", "columns", "rows"] }
       ]
     },
     "relativePath": {

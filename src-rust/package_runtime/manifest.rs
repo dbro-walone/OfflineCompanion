@@ -158,7 +158,7 @@ mod tests {
         assert_eq!(manifest.frame.width, 384);
         assert_eq!(manifest.frame.height, 512);
         assert!(manifest.render.is_none());
-        assert_eq!(manifest.actions.len(), 12);
+        assert_eq!(manifest.actions.len(), 17);
         assert_eq!(
             manifest.actions.get("clicked").map(String::as_str),
             Some("animations/clicked.json")
@@ -166,21 +166,24 @@ mod tests {
     }
 
     #[test]
-    fn parses_v1_action_pack_manifest() {
+    fn parses_v2_action_pack_manifest() {
         let json = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/packages/actions/shadow-crow-office/manifest.json"
         ));
         let manifest: ActionPackManifest = serde_json::from_str(json).unwrap();
 
-        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.schema_version, 2);
         assert_eq!(manifest.package_type, "action");
         assert_eq!(manifest.id, "action.shadow-crow.office");
         assert_eq!(manifest.name, "鸦影·办公动作包");
         assert_eq!(manifest.version, "1.0.0");
         assert_eq!(manifest.engine_version, ">=1.0.0 <2.0.0");
         assert_eq!(manifest.priority, Some(100));
-        assert!(manifest.render.is_none());
+        let render = manifest.render.as_ref().unwrap();
+        assert_eq!(render.atlas.as_deref(), Some("atlases/office.png"));
+        assert_eq!((render.frame_width, render.frame_height), (384, 512));
+        assert_eq!((render.columns, render.rows), (Some(4), Some(2)));
         assert_eq!(manifest.compatible_characters.len(), 1);
         assert_eq!(
             manifest.compatible_characters[0].id,

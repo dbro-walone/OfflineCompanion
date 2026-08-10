@@ -11,6 +11,7 @@ pub enum PetState {
     Dragging,
     Falling,
     Landing,
+    Recovering,
     OnEdge,
     Sleeping,
 }

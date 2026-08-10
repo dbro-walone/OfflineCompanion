@@ -2,18 +2,24 @@
 
 ## 自动化验收
 
-| 验收面 | 覆盖 |
+| Issue #47 验收项 | 自动化证据 |
 |---|---|
-| 统一事件契约 | 鼠标靠近去重、头/身体点击区分、拖动后不触发点击 |
-| 状态与记忆 | 心情过期、近期动作防止连续三次重复 |
-| 调度与会话 | 冷却、提醒优先级、点击/离开/4 秒超时 |
-| 运动 | 抛出阈值、负坐标显示器工作区限制 |
-| 动画 | once、loop、ping-pong、hold-last、帧率、分段与重复上限 |
-| 扩展包 | v1/v2、SemVer/引擎范围、资源存在性、图集尺寸、越界帧、可执行扩展名、缺失动作回退、动作包移除 |
-| 业务 | 多提醒存储与漏发恢复、番茄绝对截止时间、完成事件只发一次 |
-| 质量门禁 | rustfmt、Clippy `-D warnings`、全目标测试、Release 构建 |
+| AT-01 默认角色由 Catalog 加载 | `parses_v1_character_manifest`、`test_missing_action_falls_back_to_default` |
+| AT-02 鼠标靠近、等待回应和超时 | `test_event_normalizer_deduplicates_pointer_near`、InteractionSession 三项测试 |
+| AT-03 头部与身体点击区分 | `test_click_region_head_and_body_are_distinct` |
+| AT-04 动作包真实播放 `idle.thinking` | `idle_tick_schedules_the_enabled_action_pack`、独立图集几何测试 |
+| AT-05 关闭空闲动作 | `test_idle_action_is_disabled_by_setting`、`settings_reload_disables_idle_actions_immediately` |
+| AT-06 提醒阻止低优先级空闲动作 | `test_idle_cannot_override_active_reminder` |
+| AT-07 普通释放落地恢复 | `test_drop_enters_landing_then_idle` |
+| AT-08 左右边缘释放 | `test_left_edge_selects_edge_left`、`test_right_edge_selects_edge_right` |
+| AT-09 抛出、落地、受惊恢复 | `test_throw_enters_startled_recovery`、速度与位移上限测试 |
+| AT-10 减少动态效果保留语义 | `test_reduce_motion_keeps_release_semantics_without_flight` |
+| AT-11 动作包即时启用/禁用 | `action_pack_toggle_applies_without_restart_and_falls_back_safely` |
+| AT-12 删除后安全回退 | 删除路径边界测试、Catalog 移除引用测试及 UI 回退逻辑 |
+| AT-13 负坐标与热插拔越界恢复 | 工作区夹取测试、周期 DisplayChanged 夹取 |
+| AT-14 纯离线 | 无网络客户端依赖；扩展包拒绝脚本、动态库与可执行资源 |
 
-自动化命令：
+质量门禁：
 
 ```text
 cargo fmt --all -- --check
@@ -22,8 +28,10 @@ cargo test --locked --all-targets
 cargo build --release --locked
 ```
 
-## 人工验收
+GitHub Actions 在 Windows x64 和 macOS Universal 上重复格式、Clippy、全目标测试及 Release 构建，并上传带 SHA-256 的生产产物。
 
-Windows 11 x64 需逐项验证透明窗口、右键菜单空白处关闭、鼠标靠近、头部/身体点击、慢放/快速抛出、屏幕边缘、多显示器负坐标、提醒平滑移动、番茄后台运行与最后 5 分钟提示、浅色/深色主题、减少动态效果、安装/删除资源包和异常退出恢复。
+## 人工验收边界
 
-8 小时与 72 小时稳定性属于真实经过时间验收，不能用短时测试替代。发布候选版本应记录开始/结束时间、峰值内存、句柄数、CPU、提醒与番茄完成次数及异常日志。
+当前开发环境为 macOS，不能把 CI 构建冒充 Windows 11 手工验收。Windows 11 x64 仍需使用流水线 EXE 逐项检查透明窗口、菜单空白处关闭、拖放三路径、多显示器热插拔、提醒平滑移动、番茄后台运行、浅色/深色主题和包管理操作。
+
+72 小时稳定性也必须以真实经过时间记录，短时自动化不能替代。发布候选版本需要另行记录开始/结束时间、峰值内存、句柄数、CPU、提醒和番茄完成次数及异常日志；在该记录完成前，Issue #47 不应仅凭自动化测试关闭。

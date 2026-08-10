@@ -28,7 +28,17 @@ export struct ReminderRow {
     title: string,
     time: string,
 }
-export struct PackageRow { id: string, name: string, version: string, kind: string }
+export struct PackageRow {
+    id: string,
+    name: string,
+    version: string,
+    kind: string,
+    status: string,
+    details: string,
+    is-action: bool,
+    is-current: bool,
+    can-delete: bool,
+}
 
 component WindowSurface inherits Rectangle {
     background: Theme.window-background;
@@ -340,7 +350,7 @@ export component TimerWindow inherits Window {
 export component SettingsWindow inherits Window {
     callback dismiss-window();
     callback begin-drag();
-    callback save(float, bool, bool, bool, int, int, bool, int, int);
+    callback save(float, bool, bool, bool, int, int, bool, int, int, bool, bool, int, bool);
     in-out property <float> scale-value: 1.0;
     in-out property <bool> topmost-value: true;
     in-out property <bool> idle-value: true;
@@ -350,7 +360,11 @@ export component SettingsWindow inherits Window {
     in-out property <bool> proactive-invitation: true;
     in-out property <int> interaction-cooldown: 30;
     in-out property <int> pointer-near-distance: 120;
-    width: 480px; height: 720px; no-frame: true; background: transparent; title: "设置";
+    in-out property <bool> allow-pet-approach: false;
+    in-out property <bool> allow-mouse-follow: false;
+    in-out property <int> interaction-level-index: 1;
+    in-out property <bool> reminder-follow-pet: true;
+    width: 480px; height: 760px; no-frame: true; background: transparent; title: "设置";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
         HeaderBar { x: 0px; y: 0px; width: parent.width; title: "设置"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
@@ -360,7 +374,7 @@ export component SettingsWindow inherits Window {
                 spacing: 12px;
                 Text { height: 22px; text: "自定义鸦影的外观与行为"; color: Theme.text-secondary; }
                 Card {
-                    height: 360px;
+                    height: 475px;
                     VerticalLayout {
                         padding: 16px; spacing: 8px;
                         Text { text: "桌宠"; color: Theme.text-primary; font-size: 18px; font-weight: 600; }
@@ -370,6 +384,10 @@ export component SettingsWindow inherits Window {
                         CheckBox { text: "启用主动空闲动作"; checked <=> root.idle-value; }
                         CheckBox { text: "减少动态效果"; checked <=> root.reduce-motion-value; }
                         CheckBox { text: "允许主动互动邀请"; checked <=> root.proactive-invitation; }
+                        CheckBox { text: "允许有限距离靠近"; checked <=> root.allow-pet-approach; }
+                        CheckBox { text: "允许鼠标靠近时观察（不会持续追逐）"; checked <=> root.allow-mouse-follow; }
+                        Text { text: "互动强度"; color: Theme.text-secondary; }
+                        ComboBox { model: ["安静", "平衡", "活跃"]; current-index <=> root.interaction-level-index; }
                         Text { text: "互动冷却：" + root.interaction-cooldown + " 秒"; color: Theme.text-secondary; }
                         ComboBox { model: ["10 秒", "30 秒", "60 秒", "120 秒"]; current-index: root.interaction-cooldown == 10 ? 0 : root.interaction-cooldown == 30 ? 1 : root.interaction-cooldown == 60 ? 2 : 3; selected(value) => { root.interaction-cooldown = self.current-index == 0 ? 10 : self.current-index == 1 ? 30 : self.current-index == 2 ? 60 : 120; } }
                         Text { text: "鼠标靠近距离：" + root.pointer-near-distance + " px"; color: Theme.text-secondary; }
@@ -385,6 +403,7 @@ export component SettingsWindow inherits Window {
                         ComboBox { row: 1; col: 1; model: ["深色主题", "浅色主题"]; current-index <=> root.theme-index; }
                         Text { row: 2; col: 0; text: "久坐阈值"; color: Theme.text-secondary; }
                         ComboBox { row: 2; col: 1; model: ["30 分钟", "45 分钟", "60 分钟", "90 分钟", "120 分钟"]; current-index: root.sedentary-minutes == 30 ? 0 : root.sedentary-minutes == 45 ? 1 : root.sedentary-minutes == 60 ? 2 : root.sedentary-minutes == 90 ? 3 : 4; selected(value) => { root.sedentary-minutes = self.current-index == 0 ? 30 : self.current-index == 1 ? 45 : self.current-index == 2 ? 60 : self.current-index == 3 ? 90 : 120; } }
+                        CheckBox { row: 3; colspan: 2; text: "提醒时让宠物走到当前工作区中央"; checked <=> root.reminder-follow-pet; }
                     }
                 }
                 Text { height: 40px; text: "应用完全离线运行，不创建 HTTP 客户端，不收集遥测。"; color: Theme.text-secondary; wrap: word-wrap; }
@@ -392,7 +411,7 @@ export component SettingsWindow inherits Window {
                     height: 44px;
                     alignment: end;
                     Button { text: "取消"; clicked => { root.dismiss-window(); } }
-                    Button { text: "保存并应用"; primary: true; clicked => { root.save(root.scale-value, root.topmost-value, root.idle-value, root.reduce-motion-value, root.theme-index, root.sedentary-minutes, root.proactive-invitation, root.interaction-cooldown, root.pointer-near-distance); } }
+                    Button { text: "保存并应用"; primary: true; clicked => { root.save(root.scale-value, root.topmost-value, root.idle-value, root.reduce-motion-value, root.theme-index, root.sedentary-minutes, root.proactive-invitation, root.interaction-cooldown, root.pointer-near-distance, root.allow-pet-approach, root.allow-mouse-follow, root.interaction-level-index, root.reminder-follow-pet); } }
                 }
             }
         }
@@ -403,9 +422,12 @@ export component PackageWindow inherits Window {
     callback dismiss-window();
     callback begin-drag();
     callback import-package();
+    callback toggle-package(string);
+    callback delete-package(string);
+    callback select-character(string);
     in-out property <[PackageRow]> package-rows;
     in-out property <string> status-text: "默认角色：鸦影 1.0.0";
-    width: 590px; height: 530px; no-frame: true; background: transparent; title: "角色与动作包";
+    width: 680px; height: 620px; no-frame: true; background: transparent; title: "角色与动作包";
     WindowSurface {
         x: 14px; y: 14px; width: parent.width - 28px; height: parent.height - 28px;
         HeaderBar { x: 0px; y: 0px; width: parent.width; title: "角色与动作包"; dismiss-window => { root.dismiss-window(); } begin-drag => { root.begin-drag(); } }
@@ -420,7 +442,20 @@ export component PackageWindow inherits Window {
                     Text { text: root.status-text; color: Theme.text-secondary; wrap: word-wrap; vertical-alignment: center; }
                 }
             }
-            ListView { for package in root.package-rows: Card { height: 82px; HorizontalLayout { padding: 14px; VerticalLayout { Text { text: package.name; color: Theme.text-primary; font-size: 16px; font-weight: 600; } Text { text: package.kind + " · " + package.id; color: Theme.text-secondary; font-size: 12px; } } Text { text: package.version; color: Theme.accent; vertical-alignment: center; } } } }
+            ListView { height: 350px; for package in root.package-rows: Card {
+                height: 108px;
+                HorizontalLayout {
+                    padding: 12px; spacing: 8px;
+                    VerticalLayout {
+                        Text { text: package.name + "  " + package.status; color: Theme.text-primary; font-size: 16px; font-weight: 600; }
+                        Text { text: package.kind + " · " + package.id + " · " + package.version; color: Theme.text-secondary; font-size: 12px; }
+                        Text { text: package.details; color: Theme.text-secondary; font-size: 12px; overflow: elide; }
+                    }
+                    if package.is-action: Button { text: package.is-current ? "禁用" : "启用并预览"; clicked => { root.toggle-package(package.id); } }
+                    if !package.is-action && !package.is-current: Button { text: "设为当前角色"; clicked => { root.select-character(package.id); } }
+                    if package.can-delete: Button { text: "删除"; clicked => { root.delete-package(package.id); } }
+                }
+            } }
         }
     }
 }

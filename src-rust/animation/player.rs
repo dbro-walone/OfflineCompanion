@@ -38,6 +38,15 @@ impl AnimationPlayer {
     pub fn resume_policy(&self) -> &ResumePolicy {
         &self.definition.resume_policy
     }
+    pub fn safe_to_interrupt(&self) -> bool {
+        self.definition.interruptible
+            || self.status == PlayerStatus::Completed
+            || self
+                .frames
+                .len()
+                .checked_sub(1)
+                .is_some_and(|last| self.cursor >= last)
+    }
     pub fn tick(&mut self, now_ms: u64) -> Option<u32> {
         if self.status == PlayerStatus::Completed
             || self.frames.is_empty()
@@ -113,5 +122,16 @@ mod tests {
         p.tick(999);
         assert_eq!(p.frame(), Some(2));
         assert_eq!(p.status(), PlayerStatus::Playing)
+    }
+    #[test]
+    fn test_non_interruptible_action_waits_for_safe_boundary() {
+        let mut definition = def(PlayMode::HoldLast);
+        definition.interruptible = false;
+        let mut player = AnimationPlayer::new(definition, 0);
+        assert!(!player.safe_to_interrupt());
+        player.tick(125);
+        assert!(!player.safe_to_interrupt());
+        player.tick(250);
+        assert!(player.safe_to_interrupt());
     }
 }

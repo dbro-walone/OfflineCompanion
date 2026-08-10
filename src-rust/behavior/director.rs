@@ -1,5 +1,6 @@
 use super::{
     event::{HitRegion, PetEvent},
+    locomotion::ReleasePath,
     scheduler::{Priority, ScheduledAction, Scheduler},
     session::InteractionSession,
     state::{Mood, MoodState, PetMemory, PetState},
@@ -23,6 +24,9 @@ pub struct BehaviorController {
     pub scheduler: Scheduler,
     pub session: Option<InteractionSession>,
     pub proactive_enabled: bool,
+    pub allow_pet_approach: bool,
+    pub allow_mouse_follow: bool,
+    pub interaction_level: String,
     pub reduce_motion: bool,
     pub interaction_cooldown_ms: u64,
     last_invite_ms: Option<u64>,
@@ -37,6 +41,9 @@ impl Default for BehaviorController {
             scheduler: Scheduler::default(),
             session: None,
             proactive_enabled: true,
+            allow_pet_approach: false,
+            allow_mouse_follow: false,
+            interaction_level: "balanced".into(),
             reduce_motion: false,
             interaction_cooldown_ms: 30_000,
             last_invite_ms: None,
@@ -57,7 +64,10 @@ impl BehaviorController {
                 Some(self.action("idle", Priority::IdleRandom, now_ms))
             }
             PetEvent::PointerNear { .. }
-                if self.proactive_enabled
+                if (self.proactive_enabled
+                    || self.allow_pet_approach
+                    || self.allow_mouse_follow)
+                    && self.interaction_level != "quiet"
                     && self.last_invite_ms.is_none_or(|x| {
                         now_ms.saturating_sub(x) >= self.interaction_cooldown_ms
                     }) =>
@@ -95,25 +105,66 @@ impl BehaviorController {
                 }
                 self.state = PetState::Idle;
                 reason = "pointer left";
-                Some(self.action("idle", Priority::IdleRandom, now_ms))
+                Some(self.action("idle", Priority::ProactiveInvite, now_ms))
             }
             PetEvent::DragStarted { .. } => {
                 self.state = PetState::Dragging;
                 reason = "drag started";
                 Some(self.action("drag", Priority::UserDirectInput, now_ms))
             }
-            PetEvent::DragReleased { .. } => {
-                self.state = if self.reduce_motion {
-                    PetState::Idle
-                } else {
-                    PetState::Falling
-                };
-                reason = "drag released";
+            PetEvent::DragReleased { path, .. } => {
+                reason = "classified drag release";
+                match path {
+                    ReleasePath::EdgeLeft => {
+                        self.state = PetState::OnEdge;
+                        self.memory.last_drag_direction = Some(-1);
+                        Some(self.action("edge.left", Priority::SystemSafety, now_ms))
+                    }
+                    ReleasePath::EdgeRight => {
+                        self.state = PetState::OnEdge;
+                        self.memory.last_drag_direction = Some(1);
+                        Some(self.action("edge.right", Priority::SystemSafety, now_ms))
+                    }
+                    ReleasePath::Drop | ReleasePath::Thrown => {
+                        self.state = PetState::Falling;
+                        if *path == ReleasePath::Thrown {
+                            self.mood.set(Mood::Startled, now_ms, 3000);
+                        }
+                        Some(self.action("fall", Priority::SystemSafety, now_ms))
+                    }
+                }
+            }
+            PetEvent::Landing { path } => {
+                self.state = PetState::Landing;
+                reason = "release motion landed";
                 Some(self.action(
-                    if self.reduce_motion { "idle" } else { "fall" },
+                    if *path == ReleasePath::Thrown {
+                        "startled"
+                    } else {
+                        "landing"
+                    },
                     Priority::SystemSafety,
                     now_ms,
                 ))
+            }
+            PetEvent::ActionCompleted { action_id } => {
+                self.state = if action_id == "startled" {
+                    PetState::Recovering
+                } else if matches!(
+                    self.state,
+                    PetState::Playing
+                        | PetState::Observing
+                        | PetState::Landing
+                        | PetState::OnEdge
+                        | PetState::WaitingForResponse
+                ) {
+                    self.session = None;
+                    PetState::Idle
+                } else {
+                    self.state
+                };
+                reason = "action lifecycle completed";
+                None
             }
             PetEvent::ReminderRaised { .. } | PetEvent::SedentaryWarning => {
                 self.state = PetState::Observing;
@@ -150,10 +201,14 @@ impl BehaviorController {
                         self.session = None;
                         self.state = PetState::Idle;
                         reason = "interaction session ended";
-                        Some(self.action("idle", Priority::IdleRandom, now_ms))
+                        Some(self.action("idle", Priority::ProactiveInvite, now_ms))
                     } else {
                         None
                     }
+                } else if self.state == PetState::Recovering {
+                    self.state = PetState::Idle;
+                    reason = "startled recovery completed";
+                    Some(self.action("idle", Priority::SystemSafety, now_ms))
                 } else {
                     None
                 }
@@ -161,12 +216,9 @@ impl BehaviorController {
             _ => None,
         };
         let had_request = request.is_some();
-        let selected = request.filter(|r| self.scheduler.submit(r.clone()));
+        let selected = request.filter(|request| self.scheduler.accepts(request));
         if had_request && selected.is_none() {
             fallback = Some("higher-priority action retained".into());
-        }
-        if let Some(x) = selected.as_ref() {
-            self.memory.record_action(&x.id)
         }
         self.traces.push(DecisionTrace {
             event: format!("{event:?}"),
@@ -189,6 +241,88 @@ impl BehaviorController {
         }
     }
     pub fn complete_current(&mut self) -> Option<ScheduledAction> {
-        self.scheduler.take()
+        self.scheduler.clear().map(|active| ScheduledAction {
+            id: active.id,
+            priority: active.priority,
+            not_before_ms: active.started_at_ms,
+        })
+    }
+
+    pub fn action_started(&mut self, action: &ScheduledAction, now_ms: u64) {
+        self.scheduler.activate(action, now_ms);
+        self.memory.record_action(&action.id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn release(path: ReleasePath) -> PetEvent {
+        PetEvent::DragReleased {
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+            x: 0,
+            y: 0,
+            path,
+        }
+    }
+
+    #[test]
+    fn test_drop_enters_landing_then_idle() {
+        let mut behavior = BehaviorController::default();
+        behavior.handle(release(ReleasePath::Drop), 0);
+        assert_eq!(behavior.state, PetState::Falling);
+        behavior.handle(
+            PetEvent::Landing {
+                path: ReleasePath::Drop,
+            },
+            1,
+        );
+        assert_eq!(behavior.state, PetState::Landing);
+        behavior.handle(
+            PetEvent::ActionCompleted {
+                action_id: "landing".into(),
+            },
+            2,
+        );
+        assert_eq!(behavior.state, PetState::Idle);
+    }
+
+    #[test]
+    fn test_throw_enters_startled_recovery() {
+        let mut behavior = BehaviorController::default();
+        behavior.handle(release(ReleasePath::Thrown), 0);
+        assert_eq!(behavior.state, PetState::Falling);
+        assert_eq!(behavior.mood.mood, Mood::Startled);
+        behavior.handle(
+            PetEvent::Landing {
+                path: ReleasePath::Thrown,
+            },
+            1,
+        );
+        assert_eq!(behavior.state, PetState::Landing);
+        behavior.handle(
+            PetEvent::ActionCompleted {
+                action_id: "startled".into(),
+            },
+            2,
+        );
+        assert_eq!(behavior.state, PetState::Recovering);
+        behavior.handle(PetEvent::Tick { now_ms: 3 }, 3);
+        assert_eq!(behavior.state, PetState::Idle);
+    }
+
+    #[test]
+    fn test_landing_completes_falling_state() {
+        let mut behavior = BehaviorController::default();
+        behavior.handle(release(ReleasePath::Drop), 0);
+        behavior.handle(
+            PetEvent::Landing {
+                path: ReleasePath::Drop,
+            },
+            1,
+        );
+        assert_ne!(behavior.state, PetState::Falling);
     }
 }

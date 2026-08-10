@@ -80,7 +80,7 @@ mod tests {
         assert_eq!(definition.fps, 6.0);
         assert_eq!(definition.play_mode, PlayMode::Once);
         assert!(definition.interruptible);
-        assert_eq!(definition.resume_policy, ResumePolicy::Restart);
+        assert_eq!(definition.resume_policy, ResumePolicy::Previous);
         assert!(definition.mirrorable);
         let entry = definition.segments.entry.unwrap();
         assert_eq!((entry.start, entry.end, entry.repeat), (4, 5, 1));

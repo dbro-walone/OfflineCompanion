@@ -1,13 +1,13 @@
 {
-  "id": "clicked",
+  "id": "head-pat",
   "atlas": "../atlases/base.png",
-  "fps": 6,
+  "fps": 7,
   "playMode": "once",
   "interruptible": true,
   "resumePolicy": "previous",
-  "mirrorable": true,
+  "mirrorable": false,
   "segments": {
-    "entry": { "start": 4, "end": 5, "repeat": 1 },
+    "entry": { "start": 6, "end": 7, "repeat": 2 },
     "exit": { "start": 3, "end": 3, "repeat": 1 }
   }
 }

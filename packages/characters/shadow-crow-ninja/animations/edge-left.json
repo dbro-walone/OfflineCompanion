@@ -2,7 +2,7 @@
   "id": "edge.left",
   "atlas": "../atlases/base.png",
   "fps": 1,
-  "playMode": "hold-last",
+  "playMode": "once",
   "interruptible": true,
   "resumePolicy": "idle",
   "mirrorable": false,

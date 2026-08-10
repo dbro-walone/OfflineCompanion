@@ -104,7 +104,20 @@ pub fn install_package(zip_path: &Path, characters: &Path, actions: &Path) -> Re
             crate::package_runtime::validator::validate_character(&temporary, value)?
         }
         crate::package_runtime::manifest::PackageManifest::Action(ref value) => {
-            crate::package_runtime::validator::validate_action_pack(&temporary, value)?
+            let catalog = crate::package_runtime::catalog::PackageCatalog::scan(
+                characters,
+                &actions.join(".validation-empty"),
+            );
+            let legacy_frame = value
+                .compatible_characters
+                .iter()
+                .find_map(|compatible| catalog.characters.get(&compatible.id))
+                .map(|package| (package.manifest.frame.width, package.manifest.frame.height));
+            crate::package_runtime::validator::validate_action_pack_with_legacy(
+                &temporary,
+                value,
+                legacy_frame,
+            )?
         }
     }
     let backup = base.join(format!(".backup-{}", manifest.id));
@@ -124,6 +137,20 @@ pub fn install_package(zip_path: &Path, characters: &Path, actions: &Path) -> Re
         fs::remove_dir_all(backup)?;
     }
     Ok(format!("已安装 {} {}", manifest.id, manifest.version))
+}
+
+pub fn remove_package(package_root: &Path, packages_root: &Path) -> Result<()> {
+    let package = package_root.canonicalize().context("扩展包目录不存在")?;
+    let root = packages_root.canonicalize().context("扩展包根目录不存在")?;
+    anyhow::ensure!(
+        package.parent() == Some(root.as_path()),
+        "拒绝删除根目录外的文件"
+    );
+    anyhow::ensure!(
+        package.join("manifest.json").is_file(),
+        "目标不是有效扩展包"
+    );
+    fs::remove_dir_all(package).context("删除扩展包失败")
 }
 
 fn safe_relative_path(raw: &str) -> Result<PathBuf> {
@@ -146,5 +173,18 @@ mod tests {
         assert!(safe_relative_path("../escape.txt").is_err());
         assert!(safe_relative_path("/absolute.txt").is_err());
         assert!(safe_relative_path("animations/idle.json").is_ok());
+    }
+
+    #[test]
+    fn remove_package_rejects_path_outside_package_root() {
+        let root = std::env::temp_dir().join(format!("offline-packages-{}", uuid::Uuid::new_v4()));
+        let outside =
+            std::env::temp_dir().join(format!("offline-outside-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("manifest.json"), "{}").unwrap();
+        assert!(remove_package(&outside, &root).is_err());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }

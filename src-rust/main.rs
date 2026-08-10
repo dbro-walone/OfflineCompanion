@@ -13,7 +13,7 @@ use offline_companion::{
     behavior::{
         self,
         event::PetEvent,
-        locomotion::{self, ReleasePath},
+        locomotion::{self, LocomotionController, ReleasePath},
     },
     model::{AppSettings, PomodoroPhase, PomodoroState},
     package_runtime, packages, platform,
@@ -34,14 +34,9 @@ struct PetMotion {
 }
 
 struct ReleaseMotion {
-    x: f32,
-    y: f32,
-    velocity_x: f32,
-    velocity_y: f32,
+    motion: locomotion::MotionState,
+    path: ReleasePath,
     last_tick: Instant,
-    area: platform::WorkArea,
-    width: u32,
-    height: u32,
 }
 
 type AlertPresenter = Rc<dyn Fn(String)>;
@@ -64,7 +59,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let paths = Rc::new(AppPaths::discover()?);
-    package_runtime::seeder::seed_defaults(&paths.root)?;
+    package_runtime::seeder::seed_defaults(&paths.root.join("packages"))?;
     let store = Rc::new(Store::open(&paths.database)?);
     let settings = Rc::new(RefCell::new(storage::load_settings(&paths.settings)));
     let runtime = Rc::new(RefCell::new(AppRuntime::new(
@@ -150,7 +145,13 @@ fn run() -> Result<()> {
         paths.clone(),
         runtime.clone(),
     );
-    wire_packages(&package_window, paths.clone(), runtime.clone());
+    wire_packages(
+        &package_window,
+        &pet,
+        paths.clone(),
+        settings.clone(),
+        runtime.clone(),
+    );
     wire_notification(
         &notification,
         notification_message.clone(),
@@ -206,6 +207,7 @@ fn run() -> Result<()> {
         let weak_pet = pet.as_weak();
         let settings = settings.clone();
         let was_near = Rc::new(RefCell::new(false));
+        let approach_steps = Rc::new(RefCell::new(0_u8));
         pointer_near_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
             let (Some(pet), Some((x, y))) = (weak_pet.upgrade(), platform::cursor_position())
             else {
@@ -231,6 +233,15 @@ fn run() -> Result<()> {
             let near = distance <= settings.borrow().pointer_near_distance_px as f32;
             if near != *was_near.borrow() {
                 *was_near.borrow_mut() = near;
+                *approach_steps.borrow_mut() = if near
+                    && settings.borrow().allow_pet_approach
+                    && settings.borrow().pet_interaction_level != "quiet"
+                    && !settings.borrow().reduce_motion
+                {
+                    5
+                } else {
+                    0
+                };
                 dispatch_runtime(
                     &runtime,
                     &pet,
@@ -242,6 +253,24 @@ fn run() -> Result<()> {
                         PetEvent::PointerExited
                     },
                 );
+            }
+            let mut steps = approach_steps.borrow_mut();
+            if near && *steps > 0 {
+                let center_x = p.x + s.width as i32 / 2;
+                let center_y = p.y + s.height as i32 / 2;
+                let delta_x = (x - center_x).clamp(-8, 8);
+                let delta_y = (y - center_y).clamp(-8, 8);
+                let area = platform::monitor_of_pet(pet.window());
+                let (next_x, next_y) = locomotion::clamp_to_work_area(
+                    p.x + delta_x,
+                    p.y + delta_y,
+                    s.width,
+                    s.height,
+                    area,
+                );
+                pet.window()
+                    .set_position(PhysicalPosition::new(next_x, next_y));
+                *steps -= 1;
             }
         });
     }
@@ -257,6 +286,19 @@ fn run() -> Result<()> {
             if let Ok(Some(update)) = runtime.borrow_mut().tick(monotonic_ms()) {
                 apply_runtime_update(&pet, &update);
             }
+        });
+    }
+
+    let display_change_timer = Timer::default();
+    {
+        let weak_pet = pet.as_weak();
+        let runtime = runtime.clone();
+        display_change_timer.start(TimerMode::Repeated, Duration::from_secs(2), move || {
+            let Some(pet) = weak_pet.upgrade() else {
+                return;
+            };
+            clamp_pet_to_work_area(&pet);
+            dispatch_runtime(&runtime, &pet, PetEvent::DisplayChanged);
         });
     }
 
@@ -768,6 +810,14 @@ fn wire_settings(
     window.set_proactive_invitation(initial.allow_proactive_invitation);
     window.set_interaction_cooldown(initial.interaction_cooldown_seconds as i32);
     window.set_pointer_near_distance(initial.pointer_near_distance_px as i32);
+    window.set_allow_pet_approach(initial.allow_pet_approach);
+    window.set_allow_mouse_follow(initial.allow_mouse_follow);
+    window.set_interaction_level_index(match initial.pet_interaction_level.as_str() {
+        "quiet" => 0,
+        "active" => 2,
+        _ => 1,
+    });
+    window.set_reminder_follow_pet(initial.reminder_follow_pet);
     let weak_window = window.as_weak();
     let weak_pet = pet.as_weak();
     let weak_todos = todos.as_weak();
@@ -784,7 +834,11 @@ fn wire_settings(
               sedentary,
               proactive,
               cooldown,
-              near_distance| {
+              near_distance,
+              allow_approach,
+              allow_mouse_follow,
+              interaction_level,
+              reminder_follow_pet| {
             let mut value = settings.borrow_mut();
             value.pet_scale = scale.clamp(0.75, 1.4);
             value.topmost = topmost;
@@ -795,12 +849,18 @@ fn wire_settings(
             value.allow_proactive_invitation = proactive;
             value.interaction_cooldown_seconds = cooldown.clamp(10, 120) as u64;
             value.pointer_near_distance_px = near_distance.clamp(60, 240) as u32;
+            value.allow_pet_approach = allow_approach;
+            value.allow_mouse_follow = allow_mouse_follow;
+            value.pet_interaction_level = match interaction_level {
+                0 => "quiet",
+                2 => "active",
+                _ => "balanced",
+            }
+            .into();
+            value.reminder_follow_pet = reminder_follow_pet;
             {
                 let mut runtime = runtime.borrow_mut();
-                runtime.behavior.proactive_enabled = proactive;
-                runtime.behavior.reduce_motion = reduce_motion;
-                runtime.behavior.interaction_cooldown_ms =
-                    value.interaction_cooldown_seconds * 1000;
+                runtime.apply_settings(&value, monotonic_ms());
             }
             let _ = storage::save_settings(&paths.settings, &value);
             if let Some(pet) = weak_pet.upgrade() {
@@ -833,28 +893,156 @@ fn wire_settings(
     );
 }
 
-fn wire_packages(window: &PackageWindow, paths: Rc<AppPaths>, runtime: Rc<RefCell<AppRuntime>>) {
+fn wire_packages(
+    window: &PackageWindow,
+    pet: &PetWindow,
+    paths: Rc<AppPaths>,
+    settings: Rc<RefCell<AppSettings>>,
+    runtime: Rc<RefCell<AppRuntime>>,
+) {
     refresh_packages(window, &runtime.borrow());
-    let weak = window.as_weak();
-    window.on_import_package(move || {
-        let Some(window) = weak.upgrade() else { return };
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("扩展包", &["zip"])
-            .pick_file()
-        else {
-            return;
-        };
-        match packages::install_package(&path, &paths.characters, &paths.actions) {
-            Ok(status) => {
-                runtime
-                    .borrow_mut()
-                    .reload(&paths.characters, &paths.actions);
-                refresh_packages(&window, &runtime.borrow());
-                window.set_status_text(status.into())
+    {
+        let weak = window.as_weak();
+        let paths = paths.clone();
+        let runtime = runtime.clone();
+        window.on_import_package(move || {
+            let Some(window) = weak.upgrade() else { return };
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("扩展包", &["zip"])
+                .pick_file()
+            else {
+                return;
+            };
+            match packages::install_package(&path, &paths.characters, &paths.actions) {
+                Ok(status) => {
+                    runtime
+                        .borrow_mut()
+                        .reload(&paths.characters, &paths.actions);
+                    refresh_packages(&window, &runtime.borrow());
+                    window.set_status_text(format!("{status}；可点击“启用并预览”立即验证").into())
+                }
+                Err(error) => window.set_status_text(format!("导入失败：{error}").into()),
             }
-            Err(error) => window.set_status_text(format!("导入失败：{error}").into()),
-        }
-    });
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let weak_pet = pet.as_weak();
+        let paths = paths.clone();
+        let settings = settings.clone();
+        let runtime = runtime.clone();
+        window.on_toggle_package(move |id| {
+            let Some(window) = weak.upgrade() else { return };
+            let id = id.to_string();
+            let enabled = runtime
+                .borrow()
+                .enabled_action_pack_ids()
+                .iter()
+                .any(|value| value == &id);
+            let update = {
+                let mut runtime = runtime.borrow_mut();
+                if !runtime.set_action_pack_enabled(&id, !enabled) {
+                    window.set_status_text("动作包不存在或已失效".into());
+                    return;
+                }
+                if enabled {
+                    runtime.activate_default(monotonic_ms())
+                } else {
+                    runtime.preview_action_pack(&id, monotonic_ms())
+                }
+            };
+            persist_runtime_package_settings(&settings, &paths, &runtime.borrow());
+            if let (Ok(Some(update)), Some(pet)) = (update, weak_pet.upgrade()) {
+                apply_runtime_update(&pet, &update);
+            }
+            refresh_packages(&window, &runtime.borrow());
+            window.set_status_text(
+                if enabled {
+                    "动作包已禁用，已回退默认动作"
+                } else {
+                    "动作包已启用并开始预览"
+                }
+                .into(),
+            );
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let weak_pet = pet.as_weak();
+        let paths = paths.clone();
+        let settings = settings.clone();
+        let runtime = runtime.clone();
+        window.on_select_character(move |id| {
+            let Some(window) = weak.upgrade() else { return };
+            let update = {
+                let mut runtime = runtime.borrow_mut();
+                if !runtime.set_character(&id) {
+                    window.set_status_text("角色包不存在或已失效".into());
+                    return;
+                }
+                runtime.activate_default(monotonic_ms())
+            };
+            persist_runtime_package_settings(&settings, &paths, &runtime.borrow());
+            if let (Ok(Some(update)), Some(pet)) = (update, weak_pet.upgrade()) {
+                apply_runtime_update(&pet, &update);
+            }
+            refresh_packages(&window, &runtime.borrow());
+            window.set_status_text("当前角色已切换，无需重启".into());
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let weak_pet = pet.as_weak();
+        let paths = paths.clone();
+        let settings = settings.clone();
+        let runtime = runtime.clone();
+        window.on_delete_package(move |id| {
+            let Some(window) = weak.upgrade() else { return };
+            let id = id.to_string();
+            if matches!(
+                id.as_str(),
+                "character.shadow-crow-ninja" | "action.shadow-crow.office"
+            ) {
+                window.set_status_text("内置默认包受保护，不能删除".into());
+                return;
+            }
+            let target = {
+                let runtime = runtime.borrow();
+                if let Some(package) = runtime.catalog().actions.get(&id) {
+                    Some((package.root.clone(), paths.actions.clone(), true))
+                } else {
+                    runtime
+                        .catalog()
+                        .characters
+                        .get(&id)
+                        .map(|package| (package.root.clone(), paths.characters.clone(), false))
+                }
+            };
+            let Some((root, package_root, is_action)) = target else {
+                window.set_status_text("扩展包不存在或已失效".into());
+                return;
+            };
+            if !is_action && runtime.borrow().current_character_id() == id {
+                window.set_status_text("请先切换到其他角色，再删除当前角色".into());
+                return;
+            }
+            if let Err(error) = packages::remove_package(&root, &package_root) {
+                window.set_status_text(format!("删除失败：{error}").into());
+                return;
+            }
+            {
+                let mut runtime = runtime.borrow_mut();
+                runtime.reload(&paths.characters, &paths.actions);
+            }
+            persist_runtime_package_settings(&settings, &paths, &runtime.borrow());
+            let update = runtime.borrow_mut().activate_default(monotonic_ms());
+            if let (Ok(Some(update)), Some(pet)) = (update, weak_pet.upgrade()) {
+                apply_runtime_update(&pet, &update);
+            }
+            refresh_packages(&window, &runtime.borrow());
+            window.set_status_text("扩展包已删除，运行时已安全回退".into());
+        });
+    }
 }
 
 fn refresh_packages(window: &PackageWindow, runtime: &AppRuntime) {
@@ -865,6 +1053,17 @@ fn refresh_packages(window: &PackageWindow, runtime: &AppRuntime) {
             name: p.manifest.name.clone().into(),
             version: p.manifest.version.clone().into(),
             kind: "角色".into(),
+            status: if runtime.current_character_id() == p.manifest.id {
+                "当前"
+            } else {
+                "可用"
+            }
+            .into(),
+            details: format!("{} 个动作", p.manifest.actions.len()).into(),
+            is_action: false,
+            is_current: runtime.current_character_id() == p.manifest.id,
+            can_delete: p.manifest.id != "character.shadow-crow-ninja"
+                && runtime.current_character_id() != p.manifest.id,
         });
     }
     for p in runtime.catalog().actions.values() {
@@ -873,9 +1072,52 @@ fn refresh_packages(window: &PackageWindow, runtime: &AppRuntime) {
             name: p.manifest.name.clone().into(),
             version: p.manifest.version.clone().into(),
             kind: "动作包".into(),
+            status: if runtime.enabled_action_pack_ids().contains(&p.manifest.id) {
+                "已启用"
+            } else {
+                "已禁用"
+            }
+            .into(),
+            details: p
+                .manifest
+                .actions
+                .iter()
+                .map(|action| {
+                    format!(
+                        "{} · {}",
+                        action.semantic.as_deref().unwrap_or(&action.id),
+                        action.trigger
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("；")
+                .into(),
+            is_action: true,
+            is_current: runtime.enabled_action_pack_ids().contains(&p.manifest.id),
+            can_delete: p.manifest.id != "action.shadow-crow.office",
         });
     }
     window.set_package_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+    if !runtime.catalog().warnings.is_empty() {
+        window.set_status_text(
+            format!(
+                "部分扩展包未加载：{}",
+                runtime.catalog().warnings.join("；")
+            )
+            .into(),
+        );
+    }
+}
+
+fn persist_runtime_package_settings(
+    settings: &Rc<RefCell<AppSettings>>,
+    paths: &AppPaths,
+    runtime: &AppRuntime,
+) {
+    let mut settings = settings.borrow_mut();
+    settings.current_character_id = runtime.current_character_id().into();
+    settings.enabled_action_pack_ids = runtime.enabled_action_pack_ids().to_vec();
+    let _ = storage::save_settings(&paths.settings, &settings);
 }
 
 fn wire_notification(
@@ -940,6 +1182,7 @@ fn wire_pet_drag(
     let release_timer = Rc::new(Timer::default());
     {
         let weak = pet.as_weak();
+        let runtime = runtime.clone();
         let release_motion = release_motion.clone();
         let weak_timer = Rc::downgrade(&release_timer);
         release_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
@@ -948,23 +1191,17 @@ fn wire_pet_drag(
             let Some(state) = motion.as_mut() else { return };
             let elapsed = state.last_tick.elapsed().as_secs_f32().clamp(0.001, 0.05);
             state.last_tick = Instant::now();
-            state.velocity_y += 1800.0 * elapsed;
-            state.x += state.velocity_x * elapsed;
-            state.y += state.velocity_y * elapsed;
-            state.velocity_x *= 0.985;
-            let (x, y) = locomotion::clamp_to_work_area(
-                state.x.round() as i32,
-                state.y.round() as i32,
-                state.width,
-                state.height,
-                state.area,
-            );
-            pet.window().set_position(PhysicalPosition::new(x, y));
-            if y >= state.area.bottom - state.height as i32 {
+            let step = state.motion.step(elapsed);
+            pet.window()
+                .set_position(PhysicalPosition::new(step.x, step.y));
+            if step.landed {
+                let path = state.path;
                 motion.take();
                 if let Some(timer) = weak_timer.upgrade() {
                     timer.stop();
                 }
+                drop(motion);
+                dispatch_runtime(&runtime, &pet, PetEvent::Landing { path });
             }
         });
         release_timer.stop();
@@ -1035,6 +1272,12 @@ fn wire_pet_drag(
             let seconds = started.elapsed().as_secs_f32().max(0.05);
             let velocity_x = (position.x - origin_x) as f32 / seconds;
             let velocity_y = (position.y - origin_y) as f32 / seconds;
+            let area = platform::monitor_of_pet(pet.window());
+            let size = pet.window().size();
+            let plan = LocomotionController {
+                reduce_motion: settings.borrow().reduce_motion,
+            }
+            .release(velocity_x, velocity_y, position.x, size.width, area);
             dispatch_runtime(
                 &runtime,
                 &pet,
@@ -1043,13 +1286,10 @@ fn wire_pet_drag(
                     velocity_y,
                     x: position.x,
                     y: position.y,
+                    path: plan.path,
                 },
             );
-            let area = platform::active_work_area(pet.window());
-            let size = pet.window().size();
-            let path =
-                locomotion::release_path(velocity_x, velocity_y, position.x, size.width, area);
-            if settings.borrow().reduce_motion {
+            if !plan.animate_flight {
                 let (x, y) = locomotion::clamp_to_work_area(
                     position.x,
                     position.y,
@@ -1058,24 +1298,21 @@ fn wire_pet_drag(
                     area,
                 );
                 pet.window().set_position(PhysicalPosition::new(x, y));
-            } else if path != ReleasePath::Edge {
+                if matches!(plan.path, ReleasePath::Drop | ReleasePath::Thrown) {
+                    dispatch_runtime(&runtime, &pet, PetEvent::Landing { path: plan.path });
+                }
+            } else {
                 *release_motion.borrow_mut() = Some(ReleaseMotion {
-                    x: position.x as f32,
-                    y: position.y as f32,
-                    velocity_x: if path == ReleasePath::Thrown {
-                        velocity_x
-                    } else {
-                        0.0
-                    },
-                    velocity_y: if path == ReleasePath::Thrown {
-                        velocity_y
-                    } else {
-                        80.0
-                    },
+                    motion: locomotion::MotionState::new(
+                        position.x,
+                        position.y,
+                        plan,
+                        area,
+                        size.width,
+                        size.height,
+                    ),
+                    path: plan.path,
                     last_tick: Instant::now(),
-                    area,
-                    width: size.width,
-                    height: size.height,
                 });
                 release_timer.restart();
             }
@@ -1394,7 +1631,7 @@ fn create_alert_presenter(
         let move_for_reminder =
             settings.borrow().reminder_follow_pet && !settings.borrow().reduce_motion;
         let (target_x, target_y) = if move_for_reminder {
-            platform::active_work_area(pet.window())
+            platform::monitor_of_foreground_window(pet.window())
                 .center(pet.window().size().width, pet.window().size().height)
         } else {
             (start.x, start.y)

@@ -21,7 +21,12 @@
   "actions": {
     "idle": "animations/idle.json",
     "clicked": "animations/clicked.json",
+    "head-pat": "animations/head-pat.json",
+    "look": "animations/look.json",
     "dragged": "animations/dragged.json",
+    "fall": "animations/fall.json",
+    "landing": "animations/landing.json",
+    "startled": "animations/startled.json",
     "reminder.default": "animations/reminder.json",
     "reminder.todo": "animations/reminder.json",
     "reminder.timer": "animations/reminder.json",

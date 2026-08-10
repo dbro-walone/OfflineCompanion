@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkArea {
     pub left: i32,
     pub top: i32,
@@ -21,19 +21,34 @@ pub fn focus_window(window: &slint::Window) {
 }
 
 #[cfg(windows)]
-pub fn active_work_area(window: &slint::Window) -> WorkArea {
+fn work_area_from_monitor(monitor: windows::Win32::Graphics::Gdi::HMONITOR) -> Option<WorkArea> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO};
+    unsafe {
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        GetMonitorInfoW(monitor, &mut info)
+            .as_bool()
+            .then_some(WorkArea {
+                left: info.rcWork.left,
+                top: info.rcWork.top,
+                right: info.rcWork.right,
+                bottom: info.rcWork.bottom,
+            })
+    }
+}
+
+#[cfg(windows)]
+pub fn monitor_of_pet(window: &slint::Window) -> WorkArea {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{
         Foundation::HWND,
-        Graphics::Gdi::{
-            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
-        },
-        UI::WindowsAndMessaging::GetForegroundWindow,
+        Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
     };
-
     unsafe {
         let handle = window.window_handle();
-        let hwnd = handle
+        if let Some(hwnd) = handle
             .window_handle()
             .ok()
             .and_then(|handle| match handle.as_raw() {
@@ -41,35 +56,18 @@ pub fn active_work_area(window: &slint::Window) -> WorkArea {
                     Some(HWND(value.hwnd.get() as *mut std::ffi::c_void))
                 }
                 _ => None,
-            });
-        let hwnd = match hwnd {
-            Some(hwnd) => hwnd,
-            None => GetForegroundWindow(),
-        };
-        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if GetMonitorInfoW(monitor, &mut info).as_bool() {
-            return WorkArea {
-                left: info.rcWork.left,
-                top: info.rcWork.top,
-                right: info.rcWork.right,
-                bottom: info.rcWork.bottom,
-            };
+            })
+            && let Some(area) =
+                work_area_from_monitor(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST))
+        {
+            return area;
         }
     }
-    WorkArea {
-        left: 0,
-        top: 0,
-        right: 1920,
-        bottom: 1080,
-    }
+    fallback_work_area()
 }
 
 #[cfg(not(windows))]
-pub fn active_work_area(window: &slint::Window) -> WorkArea {
+pub fn monitor_of_pet(window: &slint::Window) -> WorkArea {
     use slint::winit_030::WinitWindowAccessor;
 
     window
@@ -89,12 +87,62 @@ pub fn active_work_area(window: &slint::Window) -> WorkArea {
                 })
         })
         .flatten()
-        .unwrap_or(WorkArea {
-            left: 0,
-            top: 0,
-            right: 1920,
-            bottom: 1080,
-        })
+        .unwrap_or_else(fallback_work_area)
+}
+
+#[cfg(windows)]
+pub fn monitor_of_foreground_window(window: &slint::Window) -> WorkArea {
+    use windows::Win32::{
+        Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
+        UI::WindowsAndMessaging::GetForegroundWindow,
+    };
+    unsafe {
+        work_area_from_monitor(MonitorFromWindow(
+            GetForegroundWindow(),
+            MONITOR_DEFAULTTONEAREST,
+        ))
+        .unwrap_or_else(|| monitor_of_pet(window))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn monitor_of_foreground_window(window: &slint::Window) -> WorkArea {
+    monitor_of_pet(window)
+}
+
+#[cfg(windows)]
+pub fn monitor_of_cursor(window: &slint::Window) -> WorkArea {
+    use windows::Win32::{
+        Foundation::POINT,
+        Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromPoint},
+        UI::WindowsAndMessaging::GetCursorPos,
+    };
+    let mut point = POINT::default();
+    unsafe {
+        if GetCursorPos(&mut point).is_ok() {
+            return work_area_from_monitor(MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST))
+                .unwrap_or_else(|| monitor_of_pet(window));
+        }
+    }
+    monitor_of_pet(window)
+}
+
+#[cfg(not(windows))]
+pub fn monitor_of_cursor(window: &slint::Window) -> WorkArea {
+    monitor_of_pet(window)
+}
+
+pub fn active_work_area(window: &slint::Window) -> WorkArea {
+    monitor_of_pet(window)
+}
+
+fn fallback_work_area() -> WorkArea {
+    WorkArea {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1080,
+    }
 }
 
 #[cfg(windows)]
