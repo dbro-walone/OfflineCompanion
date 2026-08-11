@@ -290,8 +290,10 @@ mod tests {
 
     #[test]
     fn test_app_started_refreshes_energy() {
-        let mut stats = PetStats::default();
-        stats.energy = 0.2;
+        let mut stats = PetStats {
+            energy: 0.2,
+            ..Default::default()
+        };
         stats.apply(&PetEvent::AppStarted, 0);
         assert!((stats.energy - 1.0).abs() < 1e-4);
     }
@@ -365,17 +367,25 @@ mod tests {
 
     #[test]
     fn test_derived_stat_predicates() {
-        let mut stats = PetStats::default();
-        assert!(!stats.is_exhausted());
-        assert!(!stats.is_bonded());
+        let exhausted = PetStats {
+            energy: 0.1,
+            ..Default::default()
+        };
+        assert!(exhausted.is_exhausted());
 
-        stats.energy = 0.1;
-        assert!(stats.is_exhausted());
+        let bonded = PetStats {
+            affinity: 0.8,
+            ..Default::default()
+        };
+        assert!(bonded.is_bonded());
 
-        stats.affinity = 0.8;
-        assert!(stats.is_bonded());
+        let inquisitive = PetStats {
+            curiosity: 0.7,
+            ..Default::default()
+        };
+        assert!(inquisitive.is_inquisitive());
 
-        stats.curiosity = 0.7;
-        assert!(stats.is_inquisitive());
+        assert!(!PetStats::default().is_exhausted());
+        assert!(!PetStats::default().is_bonded());
     }
 }

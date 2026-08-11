@@ -162,17 +162,13 @@ pub struct EmotionContext<'a> {
 
 /// Computes the pet's current [`EmotionState`] from the event stream and the
 /// pet's personality, stats and memory.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EmotionEngine {
     pub state: EmotionState,
     last_ms: u64,
 }
 
 impl EmotionEngine {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Advance decay for elapsed time, then fold in the event's effect.
     pub fn apply(&mut self, event: &PetEvent, now_ms: u64, ctx: EmotionContext) {
         self.decay(now_ms, ctx.personality, ctx.stats);
@@ -262,15 +258,6 @@ impl EmotionEngine {
                 s.relaxed = clamp01(s.relaxed + 0.10);
             }
             _ => {}
-        }
-    }
-}
-
-impl Default for EmotionEngine {
-    fn default() -> Self {
-        Self {
-            state: EmotionState::baseline(),
-            last_ms: 0,
         }
     }
 }
