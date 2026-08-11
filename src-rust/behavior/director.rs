@@ -1,9 +1,13 @@
 use super::{
+    emotion::{EmotionState, Personality},
     event::{HitRegion, PetEvent},
     locomotion::ReleasePath,
+    planner::{BehaviorContext, BehaviorIntent, BehaviorPlanner},
     scheduler::{Priority, ScheduledAction, Scheduler},
     session::InteractionSession,
     state::{Mood, MoodState, PetMemory, PetState},
+    state_model::PetStats,
+    tree::BehaviorTree,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +27,12 @@ pub struct BehaviorController {
     pub memory: PetMemory,
     pub scheduler: Scheduler,
     pub session: Option<InteractionSession>,
+    pub planner: BehaviorPlanner,
+    pub tree: BehaviorTree,
+    /// Latest snapshot of the brain state the planner reads. The runtime feeds
+    /// the emotion-driven fields via [`BehaviorController::observe`]; the
+    /// controller refreshes the live fields each turn before planning.
+    pub brain: BehaviorContext,
     pub proactive_enabled: bool,
     pub allow_pet_approach: bool,
     pub allow_mouse_follow: bool,
@@ -40,6 +50,9 @@ impl Default for BehaviorController {
             memory: PetMemory::default(),
             scheduler: Scheduler::default(),
             session: None,
+            planner: BehaviorPlanner,
+            tree: BehaviorTree,
+            brain: BehaviorContext::rested(),
             proactive_enabled: true,
             allow_pet_approach: false,
             allow_mouse_follow: false,
@@ -57,7 +70,136 @@ impl BehaviorController {
         self.mood.tick(now_ms);
         let mut reason = "event observed";
         let mut fallback = None;
-        let request = match &event {
+
+        // Refresh the controller-owned portion of the behavior context, then
+        // snapshot it. Emotion-driven fields are fed in via `observe`.
+        self.brain.state = self.state;
+        self.brain.last_interaction_ms = self.last_invite_ms;
+        self.brain.has_active_session = self.session.is_some();
+        self.brain.proactive_allowed = self.proactive_invite_allowed(now_ms);
+        let ctx = self.brain;
+
+        // 1. New intent-based layer: planner -> intent -> tree -> action.
+        //    The planner declines most physical/system events, in which case we
+        //    fall back to the verified event->action mapping below.
+        let candidate = self.planner.plan(&event, now_ms, &ctx);
+        let planned = candidate.and_then(|intent| {
+            self.tree.resolve(intent, &event, &ctx).map(|resolved| (intent, resolved))
+        });
+
+        let request = if let Some((intent, resolved)) = planned {
+            self.apply_intent(intent, now_ms);
+            reason = resolved.reason;
+            Some(self.action(resolved.action_id, resolved.priority, now_ms))
+        } else {
+            let (fallback_request, fallback_reason) = self.legacy_dispatch(&event, now_ms);
+            reason = fallback_reason;
+            fallback_request
+        };
+
+        let had_request = request.is_some();
+        let selected = request.filter(|request| self.scheduler.accepts(request));
+        if had_request && selected.is_none() {
+            fallback = Some("higher-priority action retained".into());
+        }
+        self.traces.push(DecisionTrace {
+            event: format!("{event:?}"),
+            state: self.state,
+            mood: self.mood.mood,
+            selected_action: selected.as_ref().map(|x| x.id.clone()),
+            reason: reason.into(),
+            fallback,
+        });
+        if self.traces.len() > 128 {
+            self.traces.remove(0);
+        }
+        selected
+    }
+
+    /// Feed the latest emotion-driven brain state into the behavior context.
+    ///
+    /// Called by the runtime after advancing stats and emotion, so the planner
+    /// decides from fresh numbers rather than stale defaults. Personality is
+    /// synced here too; the controller-owned context fields are refreshed per
+    /// decision inside [`BehaviorController::handle`].
+    pub fn observe(&mut self, stats: &PetStats, emotion: &EmotionState, personality: Personality) {
+        self.brain.energy = stats.energy;
+        self.brain.affinity = stats.affinity;
+        self.brain.curiosity = stats.curiosity;
+        self.brain.emotion = *emotion;
+        self.brain.personality = personality;
+    }
+
+    /// Whether a proactive invite may fire right now, mirroring the legacy
+    /// PointerNear guard so the planner stays consistent with the fallback.
+    fn proactive_invite_allowed(&self, now_ms: u64) -> bool {
+        if self.interaction_level == "quiet" {
+            return false;
+        }
+        if !(self.proactive_enabled || self.allow_pet_approach || self.allow_mouse_follow) {
+            return false;
+        }
+        self.last_invite_ms.is_none_or(|last| {
+            now_ms.saturating_sub(last) >= self.interaction_cooldown_ms
+        })
+    }
+
+    /// Apply the state-machine side effects of acting on a planned intent.
+    ///
+    /// Where an intent overlaps a legacy event (a proximity invite, a click) the
+    /// effects mirror the verified arm so the new path stays behaviorally
+    /// consistent with the fallback.
+    fn apply_intent(&mut self, intent: BehaviorIntent, now_ms: u64) {
+        match intent {
+            BehaviorIntent::NoticeUser
+            | BehaviorIntent::ApproachUser
+            | BehaviorIntent::SeekAttention => {
+                self.state = PetState::WaitingForResponse;
+                self.mood.set(Mood::Curious, now_ms, 4000);
+                if self.session.is_none() {
+                    self.session = Some(InteractionSession::new(now_ms));
+                }
+                self.last_invite_ms = Some(now_ms);
+            }
+            BehaviorIntent::Play => {
+                if let Some(session) = self.session.as_mut() {
+                    session.click();
+                }
+                self.state = PetState::Playing;
+                self.mood.set(Mood::Playful, now_ms, 1800);
+            }
+            BehaviorIntent::Avoid => {
+                if let Some(session) = self.session.as_mut() {
+                    session.click();
+                }
+                self.state = PetState::Playing;
+                self.mood.set(Mood::Startled, now_ms, 1800);
+            }
+            BehaviorIntent::Rest => {
+                self.state = PetState::Idle;
+                self.mood.set(Mood::Calm, now_ms, 4000);
+            }
+            BehaviorIntent::Sleep => {
+                self.state = PetState::Idle;
+                self.mood.set(Mood::Sleepy, now_ms, 8000);
+            }
+            BehaviorIntent::Explore => {
+                self.state = PetState::Observing;
+                self.mood.set(Mood::Curious, now_ms, 3000);
+            }
+        }
+    }
+
+    /// The original event -> action director logic, kept as a fallback for any
+    /// event the behavior planner declines to interpret. Preserved verbatim so
+    /// the verified physical and system transitions stay intact.
+    fn legacy_dispatch(
+        &mut self,
+        event: &PetEvent,
+        now_ms: u64,
+    ) -> (Option<ScheduledAction>, &'static str) {
+        let mut reason = "event observed";
+        let request = match event {
             PetEvent::AppStarted => {
                 self.state = PetState::Idle;
                 reason = "runtime started";
@@ -215,24 +357,9 @@ impl BehaviorController {
             }
             _ => None,
         };
-        let had_request = request.is_some();
-        let selected = request.filter(|request| self.scheduler.accepts(request));
-        if had_request && selected.is_none() {
-            fallback = Some("higher-priority action retained".into());
-        }
-        self.traces.push(DecisionTrace {
-            event: format!("{event:?}"),
-            state: self.state,
-            mood: self.mood.mood,
-            selected_action: selected.as_ref().map(|x| x.id.clone()),
-            reason: reason.into(),
-            fallback,
-        });
-        if self.traces.len() > 128 {
-            self.traces.remove(0);
-        }
-        selected
+        (request, reason)
     }
+
     fn action(&self, id: &str, priority: Priority, now_ms: u64) -> ScheduledAction {
         ScheduledAction {
             id: id.into(),
@@ -324,5 +451,50 @@ mod tests {
             1,
         );
         assert_ne!(behavior.state, PetState::Falling);
+    }
+
+    #[test]
+    fn test_planner_supersedes_legacy_for_social_events() {
+        // A default body click resolves through the planner as Play -> clicked,
+        // never reaching the legacy arm.
+        let mut behavior = BehaviorController::default();
+        let action = behavior.handle(
+            PetEvent::PetClicked {
+                region: HitRegion::Body,
+                click_count: 1,
+            },
+            0,
+        );
+        assert_eq!(behavior.state, PetState::Playing);
+        assert_eq!(behavior.mood.mood, Mood::Playful);
+        assert_eq!(action.as_ref().map(|a| a.id.as_str()), Some("clicked"));
+    }
+
+    #[test]
+    fn test_falls_back_to_legacy_for_physical_events() {
+        // The planner declines drag releases, so the verified falling/edge
+        // transitions still come from the legacy mapping.
+        let mut behavior = BehaviorController::default();
+        let action = behavior.handle(
+            PetEvent::DragReleased {
+                velocity_x: 0.0,
+                velocity_y: 0.0,
+                x: 0,
+                y: 0,
+                path: ReleasePath::EdgeLeft,
+            },
+            0,
+        );
+        assert_eq!(behavior.state, PetState::OnEdge);
+        assert_eq!(action.as_ref().map(|a| a.id.as_str()), Some("edge.left"));
+    }
+
+    #[test]
+    fn test_exhausted_idle_tick_sleeps_via_planner() {
+        let mut behavior = BehaviorController::default();
+        behavior.brain.energy = 0.1;
+        let action = behavior.handle(PetEvent::Tick { now_ms: 0 }, 0);
+        assert_eq!(behavior.mood.mood, Mood::Sleepy);
+        assert_eq!(action.as_ref().map(|a| a.id.as_str()), Some("relax"));
     }
 }

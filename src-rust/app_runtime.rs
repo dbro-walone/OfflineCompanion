@@ -220,6 +220,10 @@ impl AppRuntime {
                 memory: &self.behavior.memory,
             },
         );
+        // Feed the freshly advanced stats/emotion into the behavior context so
+        // the planner decides from current numbers, then run the decision layer.
+        self.behavior
+            .observe(&self.stats, &self.emotion.state, self.personality);
         let Some(request) = self.behavior.handle(event, now_ms) else {
             return Ok(None);
         };
