@@ -301,7 +301,11 @@ fn drift(value: f32, target: f32, rate: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn ctx(personality: &Personality, stats: &PetStats, memory: &PetMemory) -> EmotionContext<'_> {
+    fn ctx<'a>(
+        personality: &'a Personality,
+        stats: &'a PetStats,
+        memory: &'a PetMemory,
+    ) -> EmotionContext<'a> {
         EmotionContext {
             personality,
             stats,
