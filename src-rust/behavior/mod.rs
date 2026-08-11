@@ -1,6 +1,9 @@
 pub mod director;
+pub mod emotion;
 pub mod event;
+pub mod event_bus;
 pub mod locomotion;
 pub mod scheduler;
 pub mod session;
 pub mod state;
+pub mod state_model;

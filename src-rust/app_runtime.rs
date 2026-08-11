@@ -6,9 +6,11 @@ use crate::{
     },
     behavior::{
         director::BehaviorController,
+        emotion::{EmotionContext, EmotionEngine, EmotionState, Personality},
         event::{EventNormalizer, PetEvent},
         scheduler::{IdleScheduler, Priority, ScheduledAction, SeededRng},
         state::PetState,
+        state_model::PetStats,
     },
     model::AppSettings,
     package_runtime::catalog::PackageCatalog,
@@ -74,6 +76,9 @@ pub struct AppRuntime {
     idle_actions_enabled: bool,
     normalizer: EventNormalizer,
     pub behavior: BehaviorController,
+    pub stats: PetStats,
+    pub personality: Personality,
+    pub emotion: EmotionEngine,
     idle_scheduler: IdleScheduler<SeededRng>,
     player: Option<AnimationPlayer>,
     render: Option<RenderState>,
@@ -92,6 +97,9 @@ impl AppRuntime {
             idle_actions_enabled: settings.idle_actions_enabled,
             normalizer: EventNormalizer::default(),
             behavior,
+            stats: PetStats::new(),
+            personality: Personality::BALANCED,
+            emotion: EmotionEngine::default(),
             idle_scheduler: IdleScheduler::default(),
             player: None,
             render: None,
@@ -199,6 +207,19 @@ impl AppRuntime {
         let Some(event) = self.normalizer.normalize(event) else {
             return Ok(None);
         };
+        // Advance the brain (state, then emotion) before behavior decides what
+        // to do. Events only describe what happened; the brain turns them into
+        // numeric state and emotion that the behavior layer may read.
+        self.stats.apply(&event, now_ms);
+        self.emotion.apply(
+            &event,
+            now_ms,
+            EmotionContext {
+                personality: &self.personality,
+                stats: &self.stats,
+                memory: &self.behavior.memory,
+            },
+        );
         let Some(request) = self.behavior.handle(event, now_ms) else {
             return Ok(None);
         };
@@ -211,6 +232,26 @@ impl AppRuntime {
         now_ms: u64,
     ) -> Result<Option<RuntimeUpdate>> {
         self.dispatch(fact.into_event(), now_ms)
+    }
+
+    /// Read-only view of the pet's numeric state, for inspection or UI.
+    pub fn stats(&self) -> &PetStats {
+        &self.stats
+    }
+
+    /// The current emotion space resulting from the event stream.
+    pub fn emotion(&self) -> &EmotionState {
+        &self.emotion.state
+    }
+
+    /// The personality profile currently driving emotional responses.
+    pub fn personality(&self) -> &Personality {
+        &self.personality
+    }
+
+    /// Replace the personality profile, e.g. when a different character loads.
+    pub fn set_personality(&mut self, personality: Personality) {
+        self.personality = personality;
     }
 
     pub fn tick(&mut self, now_ms: u64) -> Result<Option<RuntimeUpdate>> {
