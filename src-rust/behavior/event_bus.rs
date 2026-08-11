@@ -52,10 +52,7 @@ impl EventBus {
     /// Remove a previously registered subscriber, returning ownership back to
     /// the caller. Returns `None` if the handle is unknown or already removed.
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> Option<Box<dyn EventSubscriber>> {
-        let pos = self
-            .subscribers
-            .iter()
-            .position(|(sid, _)| *sid == id)?;
+        let pos = self.subscribers.iter().position(|(sid, _)| *sid == id)?;
         Some(self.subscribers.remove(pos).1)
     }
 
@@ -213,4 +210,3 @@ mod tests {
         assert!(bus.unsubscribe(id).is_some());
     }
 }
-

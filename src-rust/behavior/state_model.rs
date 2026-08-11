@@ -97,7 +97,11 @@ impl PetStats {
     fn apply_event(&mut self, event: &PetEvent) {
         match event {
             PetEvent::AppStarted => {
-                self.adjust(StatKind::Energy, 1.0 - self.energy, "app started: refreshed");
+                self.adjust(
+                    StatKind::Energy,
+                    1.0 - self.energy,
+                    "app started: refreshed",
+                );
                 self.adjust(StatKind::Curiosity, 0.05, "app started: looking around");
             }
             PetEvent::PointerEntered { .. } => {

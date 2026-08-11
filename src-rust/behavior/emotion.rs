@@ -189,7 +189,10 @@ impl EmotionEngine {
         // Transient emotions fade toward zero, lingering longer for pets that
         // hold on to feelings (playful keep happiness, sensitive keep annoyance).
         s.happy = fade(s.happy, 0.06 * dt_s * (1.0 - 0.4 * personality.playfulness));
-        s.annoyed = fade(s.annoyed, 0.07 * dt_s * (1.0 - 0.6 * personality.sensitivity));
+        s.annoyed = fade(
+            s.annoyed,
+            0.07 * dt_s * (1.0 - 0.6 * personality.sensitivity),
+        );
         s.shy = fade(s.shy, 0.06 * dt_s * (1.0 - 0.5 * personality.sensitivity));
         s.confused = fade(s.confused, 0.12 * dt_s);
         // Sleepiness tracks the pet's energy level; calm contentment returns to a baseline.
@@ -201,7 +204,10 @@ impl EmotionEngine {
         let personality = ctx.personality;
         let s = &mut self.state;
         match event {
-            PetEvent::PetClicked { region, click_count } => match region {
+            PetEvent::PetClicked {
+                region,
+                click_count,
+            } => match region {
                 HitRegion::Head => {
                     // A pat is comforting, more so for playful/attached pets.
                     s.happy = clamp01(s.happy + 0.30 * (0.6 + 0.4 * personality.playfulness));
@@ -295,11 +301,7 @@ fn drift(value: f32, target: f32, rate: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn ctx(
-        personality: &Personality,
-        stats: &PetStats,
-        memory: &PetMemory,
-    ) -> EmotionContext<'_> {
+    fn ctx(personality: &Personality, stats: &PetStats, memory: &PetMemory) -> EmotionContext<'_> {
         EmotionContext {
             personality,
             stats,
@@ -440,7 +442,11 @@ mod tests {
         let stats = PetStats::default();
         let memory = PetMemory::default();
         let mut engine = EmotionEngine::default();
-        engine.apply(&PetEvent::PomodoroCompleted, 0, ctx(&balanced, &stats, &memory));
+        engine.apply(
+            &PetEvent::PomodoroCompleted,
+            0,
+            ctx(&balanced, &stats, &memory),
+        );
         assert_eq!(engine.state.dominant(), EmotionKind::Happy);
     }
 
@@ -457,7 +463,11 @@ mod tests {
         let memory = PetMemory::default();
 
         let mut happy_engine = EmotionEngine::default();
-        happy_engine.apply(&PetEvent::PomodoroCompleted, 0, ctx(&balanced, &stats, &memory));
+        happy_engine.apply(
+            &PetEvent::PomodoroCompleted,
+            0,
+            ctx(&balanced, &stats, &memory),
+        );
         assert_eq!(happy_engine.state.to_mood(), Mood::Happy);
 
         assert_eq!(EmotionState::default().to_mood(), Mood::Calm);
