@@ -171,9 +171,10 @@ impl BehaviorPlanner {
         }
         match event {
             PetEvent::PointerNear { .. } => self.plan_for_proximity(ctx),
-            PetEvent::PetClicked { region, click_count } => {
-                Some(self.plan_for_click(*region, *click_count, ctx))
-            }
+            PetEvent::PetClicked {
+                region,
+                click_count,
+            } => Some(self.plan_for_click(*region, *click_count, ctx)),
             PetEvent::Tick { .. } => self.plan_for_life(now_ms, ctx),
             _ => None,
         }
@@ -216,8 +217,8 @@ impl BehaviorPlanner {
     /// or once the pokes come in a rapid barrage.
     fn is_overstimulated(&self, click_count: u8, ctx: &BehaviorContext) -> bool {
         let sensitive = ctx.personality.sensitivity > SENSITIVE;
-        let annoyed_dominant = ctx.emotion.annoyed >= ANNOYED_SALIENT
-            && ctx.emotion.annoyed > ctx.emotion.happy;
+        let annoyed_dominant =
+            ctx.emotion.annoyed >= ANNOYED_SALIENT && ctx.emotion.annoyed > ctx.emotion.happy;
         sensitive && (annoyed_dominant || click_count >= RAPID_POKE_COUNT)
     }
 
@@ -232,7 +233,9 @@ impl BehaviorPlanner {
         if ctx.energy <= SLEEP_ENERGY {
             return Some(BehaviorIntent::Sleep);
         }
-        let idle_ms = ctx.last_interaction_ms.map_or(now_ms, |last| now_ms.saturating_sub(last));
+        let idle_ms = ctx
+            .last_interaction_ms
+            .map_or(now_ms, |last| now_ms.saturating_sub(last));
         if idle_ms >= ATTENTION_IDLE_MS && ctx.personality.activity > ACTIVE {
             return Some(BehaviorIntent::SeekAttention);
         }
@@ -304,8 +307,14 @@ mod tests {
             personality: Personality::new(0.5, 0.8, 0.5, 0.5, 0.5),
             ..ctx()
         };
-        assert_eq!(planner.plan(&near(), 0, &bonded), Some(BehaviorIntent::ApproachUser));
-        assert_eq!(planner.plan(&near(), 0, &attached), Some(BehaviorIntent::ApproachUser));
+        assert_eq!(
+            planner.plan(&near(), 0, &bonded),
+            Some(BehaviorIntent::ApproachUser)
+        );
+        assert_eq!(
+            planner.plan(&near(), 0, &attached),
+            Some(BehaviorIntent::ApproachUser)
+        );
     }
 
     #[test]
@@ -315,7 +324,10 @@ mod tests {
             affinity: 0.3,
             ..ctx()
         };
-        assert_eq!(planner.plan(&near(), 0, &stranger), Some(BehaviorIntent::NoticeUser));
+        assert_eq!(
+            planner.plan(&near(), 0, &stranger),
+            Some(BehaviorIntent::NoticeUser)
+        );
     }
 
     #[test]
@@ -346,7 +358,10 @@ mod tests {
             emotion: annoyed(0.9),
             ..ctx()
         };
-        assert_eq!(planner.plan(&head(), 0, &grumpy), Some(BehaviorIntent::Play));
+        assert_eq!(
+            planner.plan(&head(), 0, &grumpy),
+            Some(BehaviorIntent::Play)
+        );
     }
 
     #[test]
@@ -357,7 +372,10 @@ mod tests {
             emotion: happy(0.7),
             ..ctx()
         };
-        assert_eq!(planner.plan(&body(1), 0, &playful), Some(BehaviorIntent::Play));
+        assert_eq!(
+            planner.plan(&body(1), 0, &playful),
+            Some(BehaviorIntent::Play)
+        );
     }
 
     #[test]
@@ -368,7 +386,10 @@ mod tests {
             emotion: annoyed(0.6),
             ..ctx()
         };
-        assert_eq!(planner.plan(&body(2), 0, &irked), Some(BehaviorIntent::Avoid));
+        assert_eq!(
+            planner.plan(&body(2), 0, &irked),
+            Some(BehaviorIntent::Avoid)
+        );
     }
 
     #[test]
@@ -391,7 +412,10 @@ mod tests {
             energy: 0.1,
             ..ctx()
         };
-        assert_eq!(planner.plan(&tick(0), 0, &exhausted), Some(BehaviorIntent::Sleep));
+        assert_eq!(
+            planner.plan(&tick(0), 0, &exhausted),
+            Some(BehaviorIntent::Sleep)
+        );
     }
 
     #[test]
@@ -415,7 +439,10 @@ mod tests {
             personality: Personality::new(0.5, 0.5, 0.8, 0.5, 0.5),
             ..ctx()
         };
-        assert_eq!(planner.plan(&tick(0), 0, &curious), Some(BehaviorIntent::Explore));
+        assert_eq!(
+            planner.plan(&tick(0), 0, &curious),
+            Some(BehaviorIntent::Explore)
+        );
     }
 
     #[test]
@@ -425,7 +452,10 @@ mod tests {
             energy: 0.2,
             ..ctx()
         };
-        assert_eq!(planner.plan(&tick(0), 0, &drowsy), Some(BehaviorIntent::Rest));
+        assert_eq!(
+            planner.plan(&tick(0), 0, &drowsy),
+            Some(BehaviorIntent::Rest)
+        );
     }
 
     #[test]

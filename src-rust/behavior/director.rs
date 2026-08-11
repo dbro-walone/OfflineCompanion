@@ -84,7 +84,9 @@ impl BehaviorController {
         //    fall back to the verified event->action mapping below.
         let candidate = self.planner.plan(&event, now_ms, &ctx);
         let planned = candidate.and_then(|intent| {
-            self.tree.resolve(intent, &event, &ctx).map(|resolved| (intent, resolved))
+            self.tree
+                .resolve(intent, &event, &ctx)
+                .map(|resolved| (intent, resolved))
         });
 
         let request = if let Some((intent, resolved)) = planned {
@@ -139,9 +141,8 @@ impl BehaviorController {
         if !(self.proactive_enabled || self.allow_pet_approach || self.allow_mouse_follow) {
             return false;
         }
-        self.last_invite_ms.is_none_or(|last| {
-            now_ms.saturating_sub(last) >= self.interaction_cooldown_ms
-        })
+        self.last_invite_ms
+            .is_none_or(|last| now_ms.saturating_sub(last) >= self.interaction_cooldown_ms)
     }
 
     /// Apply the state-machine side effects of acting on a planned intent.

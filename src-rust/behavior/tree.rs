@@ -144,7 +144,10 @@ impl BehaviorTree {
 /// A head pat plays the `head-pat` action; any other play interaction plays `clicked`.
 fn play_action_id(event: &PetEvent) -> &'static str {
     match event {
-        PetEvent::PetClicked { region: HitRegion::Head, .. } => "head-pat",
+        PetEvent::PetClicked {
+            region: HitRegion::Head,
+            ..
+        } => "head-pat",
         _ => "clicked",
     }
 }
@@ -183,8 +186,14 @@ mod tests {
     #[test]
     fn play_resolves_to_head_pat_or_clicked_by_region() {
         let tree = BehaviorTree;
-        assert_eq!(tree.resolve(Play, &head(), &ctx()).unwrap().action_id, "head-pat");
-        assert_eq!(tree.resolve(Play, &body(), &ctx()).unwrap().action_id, "clicked");
+        assert_eq!(
+            tree.resolve(Play, &head(), &ctx()).unwrap().action_id,
+            "head-pat"
+        );
+        assert_eq!(
+            tree.resolve(Play, &body(), &ctx()).unwrap().action_id,
+            "clicked"
+        );
     }
 
     #[test]
