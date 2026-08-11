@@ -1,0 +1,13 @@
+{
+  "id": "startled",
+  "atlas": "../atlases/base.png",
+  "fps": 7,
+  "playMode": "once",
+  "interruptible": false,
+  "resumePolicy": "idle",
+  "mirrorable": true,
+  "segments": {
+    "entry": { "start": 4, "end": 6, "repeat": 2 },
+    "exit": { "start": 3, "end": 3, "repeat": 1 }
+  }
+}

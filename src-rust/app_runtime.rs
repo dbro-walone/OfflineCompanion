@@ -90,15 +90,22 @@ impl AppRuntime {
     pub fn new(characters: &Path, actions: &Path, settings: &AppSettings) -> Self {
         let mut behavior = BehaviorController::default();
         apply_behavior_settings(&mut behavior, settings);
+        let catalog = PackageCatalog::scan(characters, actions);
+        // Seed the emotion engine from the loaded character's manifest profile.
+        // A v1 character has no personality layer and yields the balanced default.
+        let personality = catalog
+            .resolve_character(&settings.current_character_id)
+            .map(|package| package.manifest.personality())
+            .unwrap_or(Personality::BALANCED);
         Self {
-            catalog: PackageCatalog::scan(characters, actions),
+            catalog,
             character_id: settings.current_character_id.clone(),
             enabled_packs: settings.enabled_action_pack_ids.clone(),
             idle_actions_enabled: settings.idle_actions_enabled,
             normalizer: EventNormalizer::default(),
             behavior,
             stats: PetStats::new(),
-            personality: Personality::BALANCED,
+            personality,
             emotion: EmotionEngine::default(),
             idle_scheduler: IdleScheduler::default(),
             player: None,
@@ -131,6 +138,7 @@ impl AppRuntime {
                 .cloned()
                 .unwrap_or_default();
         }
+        self.apply_character_personality();
         self.stop_current();
     }
 
@@ -139,6 +147,7 @@ impl AppRuntime {
             return false;
         }
         self.character_id = id.into();
+        self.apply_character_personality();
         self.stop_current();
         true
     }
@@ -256,6 +265,17 @@ impl AppRuntime {
     /// Replace the personality profile, e.g. when a different character loads.
     pub fn set_personality(&mut self, personality: Personality) {
         self.personality = personality;
+    }
+
+    /// Seed the emotion engine from the current character's manifest profile.
+    ///
+    /// Called whenever the active character changes (on load, switch, reload).
+    /// A v1 character has no personality layer and yields the balanced default,
+    /// so the original neutral behavior is preserved.
+    fn apply_character_personality(&mut self) {
+        if let Some(package) = self.catalog.resolve_character(&self.character_id) {
+            self.personality = package.manifest.personality();
+        }
     }
 
     pub fn tick(&mut self, now_ms: u64) -> Result<Option<RuntimeUpdate>> {
@@ -673,5 +693,56 @@ mod tests {
         assert!(runtime.set_action_pack_enabled("action.shadow-crow.office", false));
         let fallback = runtime.activate_default(1).unwrap().unwrap();
         assert_eq!(fallback.action_id, "idle");
+    }
+
+    #[test]
+    fn character_packages_load_without_panic() {
+        // Scanning the bundled character packages must not panic; every shipped
+        // character must pass validation and land in the catalog.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let catalog = PackageCatalog::scan(
+            &root.join("packages/characters"),
+            &root.join("packages/actions"),
+        );
+        for id in [
+            "character.shadow-crow-ninja",
+            "character.ninja-guardian",
+            "character.animal-pet",
+            "character.avatar-self",
+        ] {
+            assert!(
+                catalog.characters.contains_key(id),
+                "{} failed to load: {:?}",
+                id,
+                catalog.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn character_package_seeds_personality_on_switch() {
+        let mut runtime = runtime();
+        // shadow-crow-ninja is a v1 manifest with no personality layer, so the
+        // engine falls back to the balanced default.
+        assert_eq!(runtime.personality(), &Personality::BALANCED);
+
+        // ninja-guardian is v2: reserved and watchful (low activity, high
+        // attachment, high sensitivity).
+        assert!(runtime.set_character("character.ninja-guardian"));
+        let guardian = *runtime.personality();
+        assert!((guardian.activity - 0.4).abs() < 1e-6);
+        assert!((guardian.attachment - 0.7).abs() < 1e-6);
+        assert!((guardian.sensitivity - 0.6).abs() < 1e-6);
+
+        // animal-pet is v2: lively and clingy (high activity/attachment/play).
+        assert!(runtime.set_character("character.animal-pet"));
+        let pet = *runtime.personality();
+        assert!((pet.activity - 0.8).abs() < 1e-6);
+        assert!((pet.attachment - 0.9).abs() < 1e-6);
+        assert!((pet.playfulness - 0.9).abs() < 1e-6);
+
+        // Switching back to the v1 character restores the balanced default.
+        assert!(runtime.set_character("character.shadow-crow-ninja"));
+        assert_eq!(runtime.personality(), &Personality::BALANCED);
     }
 }

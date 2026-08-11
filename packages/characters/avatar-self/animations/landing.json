@@ -1,0 +1,13 @@
+{
+  "id": "landing",
+  "atlas": "../atlases/base.png",
+  "fps": 6,
+  "playMode": "once",
+  "interruptible": false,
+  "resumePolicy": "idle",
+  "mirrorable": true,
+  "segments": {
+    "entry": { "start": 5, "end": 6, "repeat": 1 },
+    "exit": { "start": 3, "end": 3, "repeat": 1 }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 2,
+  "packageType": "character",
+  "id": "character.animal-pet",
+  "name": "小萌宠",
+  "version": "1.0.0",
+  "engineVersion": ">=1.0.0 <2.0.0",
+  "author": "Local",
+  "license": "personal-use",
+  "preview": "preview.png",
+  "defaultAction": "idle",
+  "defaultScale": 1.0,
+  "scaleRange": {
+    "min": 0.75,
+    "max": 1.4
+  },
+  "frame": {
+    "width": 384,
+    "height": 512
+  },
+  "themeColor": "#f5a623",
+  "identity": {
+    "role": "萌宠型伙伴",
+    "tagline": "活泼好奇的小动物",
+    "backstory": "永远精力旺盛的小家伙，见到主人就摇尾巴，对一切充满好奇。"
+  },
+  "personality": {
+    "activity": 0.8,
+    "attachment": 0.9,
+    "curiosity": 0.8,
+    "playfulness": 0.9,
+    "sensitivity": 0.4
+  },
+  "emotionStyle": {
+    "happyIntensity": 1.0,
+    "annoyedThreshold": 0.8,
+    "sleepyDrift": 0.5,
+    "startleResponse": 0.4
+  },
+  "motionStyle": {
+    "speedMultiplier": 1.3,
+    "amplitudeMultiplier": 1.2,
+    "idleFrequency": 0.9
+  },
+  "speechStyle": {
+    "tone": "活泼",
+    "address": "主人",
+    "catchphrase": "汪汪"
+  },
+  "behaviorMapping": {
+    "noticeUser": "look",
+    "approachUser": "look",
+    "play": "clicked",
+    "seekAttention": "look",
+    "sleep": "relax"
+  },
+  "memoryProfile": {
+    "shortTermCapacity": 4,
+    "decayRate": 0.5,
+    "impressionThreshold": 0.4
+  },
+  "growthProfile": {
+    "enabled": false,
+    "initialLevel": 1,
+    "maxLevel": 10
+  },
+  "actions": {
+    "idle": "animations/idle.json",
+    "clicked": "animations/clicked.json",
+    "head-pat": "animations/head-pat.json",
+    "look": "animations/look.json",
+    "dragged": "animations/dragged.json",
+    "fall": "animations/fall.json",
+    "landing": "animations/landing.json",
+    "startled": "animations/startled.json",
+    "reminder.default": "animations/reminder.json",
+    "reminder.todo": "animations/reminder.json",
+    "reminder.timer": "animations/reminder.json",
+    "reminder.sedentary": "animations/reminder.json",
+    "celebrate": "animations/celebrate.json",
+    "focus": "animations/focus.json",
+    "relax": "animations/relax.json",
+    "edge.left": "animations/edge-left.json",
+    "edge.right": "animations/edge-right.json"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "packageType": "character",
+  "id": "character.ninja-guardian",
+  "name": "影卫",
+  "version": "1.0.0",
+  "engineVersion": ">=1.0.0 <2.0.0",
+  "author": "Local",
+  "license": "personal-use",
+  "preview": "preview.png",
+  "defaultAction": "idle",
+  "defaultScale": 1.0,
+  "scaleRange": {
+    "min": 0.75,
+    "max": 1.4
+  },
+  "frame": {
+    "width": 384,
+    "height": 512
+  },
+  "themeColor": "#1f2430",
+  "identity": {
+    "role": "守护型伙伴",
+    "tagline": "克制而警觉的影子守护者",
+    "backstory": "潜伏于桌缘的影卫，沉默而忠诚，只在必要时现身。"
+  },
+  "personality": {
+    "activity": 0.4,
+    "attachment": 0.7,
+    "curiosity": 0.3,
+    "playfulness": 0.2,
+    "sensitivity": 0.6
+  },
+  "emotionStyle": {
+    "happyIntensity": 0.6,
+    "annoyedThreshold": 0.5,
+    "sleepyDrift": 0.3,
+    "startleResponse": 0.8
+  },
+  "motionStyle": {
+    "speedMultiplier": 0.9,
+    "amplitudeMultiplier": 0.7,
+    "idleFrequency": 0.4
+  },
+  "speechStyle": {
+    "tone": "沉稳",
+    "address": "主人",
+    "catchphrase": "影随风动"
+  },
+  "behaviorMapping": {
+    "noticeUser": "look",
+    "rest": "relax",
+    "sleep": "relax"
+  },
+  "memoryProfile": {
+    "shortTermCapacity": 6,
+    "decayRate": 0.3,
+    "impressionThreshold": 0.6
+  },
+  "growthProfile": {
+    "enabled": false,
+    "initialLevel": 1,
+    "maxLevel": 10
+  },
+  "actions": {
+    "idle": "animations/idle.json",
+    "clicked": "animations/clicked.json",
+    "head-pat": "animations/head-pat.json",
+    "look": "animations/look.json",
+    "dragged": "animations/dragged.json",
+    "fall": "animations/fall.json",
+    "landing": "animations/landing.json",
+    "startled": "animations/startled.json",
+    "reminder.default": "animations/reminder.json",
+    "reminder.todo": "animations/reminder.json",
+    "reminder.timer": "animations/reminder.json",
+    "reminder.sedentary": "animations/reminder.json",
+    "celebrate": "animations/celebrate.json",
+    "focus": "animations/focus.json",
+    "relax": "animations/relax.json",
+    "edge.left": "animations/edge-left.json",
+    "edge.right": "animations/edge-right.json"
+  }
+}

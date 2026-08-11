@@ -1,0 +1,13 @@
+{
+  "id": "reminder.default",
+  "atlas": "../atlases/base.png",
+  "fps": 4,
+  "playMode": "once",
+  "interruptible": true,
+  "resumePolicy": "restart",
+  "mirrorable": false,
+  "segments": {
+    "entry": { "start": 6, "end": 6, "repeat": 3 },
+    "exit": { "start": 3, "end": 3, "repeat": 1 }
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "packageType": "character",
+  "id": "character.avatar-self",
+  "name": "数字分身",
+  "version": "1.0.0",
+  "engineVersion": ">=1.0.0 <2.0.0",
+  "author": "Local",
+  "license": "personal-use",
+  "preview": "preview.png",
+  "defaultAction": "idle",
+  "defaultScale": 1.0,
+  "scaleRange": {
+    "min": 0.75,
+    "max": 1.4
+  },
+  "frame": {
+    "width": 384,
+    "height": 512
+  },
+  "themeColor": "#4a90d9",
+  "identity": {
+    "role": "数字分身伙伴",
+    "tagline": "桌面上的另一个你",
+    "backstory": "温和而均衡的数字分身，安静地陪伴，需要时总在。"
+  },
+  "personality": {
+    "activity": 0.5,
+    "attachment": 0.6,
+    "curiosity": 0.5,
+    "playfulness": 0.4,
+    "sensitivity": 0.5
+  },
+  "emotionStyle": {
+    "happyIntensity": 0.7,
+    "annoyedThreshold": 0.6,
+    "sleepyDrift": 0.4,
+    "startleResponse": 0.5
+  },
+  "motionStyle": {
+    "speedMultiplier": 1.0,
+    "amplitudeMultiplier": 1.0,
+    "idleFrequency": 0.5
+  },
+  "speechStyle": {
+    "tone": "温和",
+    "address": "你",
+    "catchphrase": "我在"
+  },
+  "behaviorMapping": {
+    "noticeUser": "look",
+    "approachUser": "look",
+    "seekAttention": "look",
+    "rest": "relax"
+  },
+  "memoryProfile": {
+    "shortTermCapacity": 8,
+    "decayRate": 0.2,
+    "impressionThreshold": 0.5
+  },
+  "growthProfile": {
+    "enabled": false,
+    "initialLevel": 1,
+    "maxLevel": 10
+  },
+  "actions": {
+    "idle": "animations/idle.json",
+    "clicked": "animations/clicked.json",
+    "head-pat": "animations/head-pat.json",
+    "look": "animations/look.json",
+    "dragged": "animations/dragged.json",
+    "fall": "animations/fall.json",
+    "landing": "animations/landing.json",
+    "startled": "animations/startled.json",
+    "reminder.default": "animations/reminder.json",
+    "reminder.todo": "animations/reminder.json",
+    "reminder.timer": "animations/reminder.json",
+    "reminder.sedentary": "animations/reminder.json",
+    "celebrate": "animations/celebrate.json",
+    "focus": "animations/focus.json",
+    "relax": "animations/relax.json",
+    "edge.left": "animations/edge-left.json",
+    "edge.right": "animations/edge-right.json"
+  }
+}

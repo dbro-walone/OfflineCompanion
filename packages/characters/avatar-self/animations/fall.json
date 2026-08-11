@@ -1,0 +1,12 @@
+{
+  "id": "fall",
+  "atlas": "../atlases/base.png",
+  "fps": 8,
+  "playMode": "ping-pong",
+  "interruptible": true,
+  "resumePolicy": "idle",
+  "mirrorable": true,
+  "segments": {
+    "loop": { "start": 5, "end": 6, "repeat": 1 }
+  }
+}

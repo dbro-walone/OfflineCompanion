@@ -1,0 +1,12 @@
+{
+  "id": "dragged",
+  "atlas": "../atlases/base.png",
+  "fps": 1,
+  "playMode": "hold-last",
+  "interruptible": false,
+  "resumePolicy": "idle",
+  "mirrorable": true,
+  "segments": {
+    "loop": { "start": 4, "end": 4, "repeat": 1 }
+  }
+}
