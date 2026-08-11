@@ -318,7 +318,7 @@ impl CharacterManifest {
 
 #[derive(Debug, Clone)]
 pub enum PackageManifest {
-    Character(CharacterManifest),
+    Character(Box<CharacterManifest>),
     Action(ActionPackManifest),
 }
 
@@ -505,7 +505,7 @@ mod tests {
 
         // Memory and growth layers parse.
         assert_eq!(manifest.memory_profile.short_term_capacity, Some(6));
-        assert_eq!(manifest.growth_profile.enabled, false);
+        assert!(!manifest.growth_profile.enabled);
         assert_eq!(manifest.growth_profile.max_level, 10);
     }
 

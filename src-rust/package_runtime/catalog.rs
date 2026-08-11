@@ -70,7 +70,7 @@ impl PackageCatalog {
                     if let Err(error) = validate_character(&dir, &manifest) {
                         self.warnings.push(format!("{}: {error}", path.display()));
                     } else {
-                        self.insert_character(dir, manifest);
+                        self.insert_character(dir, *manifest);
                     }
                 }
                 Ok(PackageManifest::Action(manifest)) if !character => {
