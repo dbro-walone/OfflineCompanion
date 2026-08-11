@@ -256,6 +256,46 @@ pub struct BehaviorMapping {
     pub explore: Option<String>,
 }
 
+impl BehaviorMapping {
+    /// Resolve the action id for a behavior intent label, applying any override
+    /// this character declares. `intent` accepts the kebab-case form produced by
+    /// [`BehaviorIntent::label`](crate::behavior::planner::BehaviorIntent::label)
+    /// (e.g. `"notice-user"`) as well as the snake_case form. Returns
+    /// `default_action` unchanged when the character does not override the intent.
+    ///
+    /// This is the single place the behavior pipeline consults per-character
+    /// overrides: the [`BehaviorTree`](crate::behavior::tree::BehaviorTree) keeps
+    /// its character-independent defaults, and the
+    /// [`BehaviorController`](crate::behavior::director::BehaviorController) calls
+    /// this to let the active character re-express a resolved intent.
+    pub fn resolve<'a>(&'a self, intent: &str, default_action: &'a str) -> &'a str {
+        let override_action = match intent {
+            "notice-user" | "notice_user" => self.notice_user.as_deref(),
+            "approach-user" | "approach_user" => self.approach_user.as_deref(),
+            "avoid" => self.avoid.as_deref(),
+            "play" => self.play.as_deref(),
+            "rest" => self.rest.as_deref(),
+            "sleep" => self.sleep.as_deref(),
+            "seek-attention" | "seek_attention" => self.seek_attention.as_deref(),
+            "explore" => self.explore.as_deref(),
+            _ => None,
+        };
+        override_action.unwrap_or(default_action)
+    }
+
+    /// True when no intent is overridden — the engine defaults apply untouched.
+    pub fn is_empty(&self) -> bool {
+        self.notice_user.is_none()
+            && self.approach_user.is_none()
+            && self.avoid.is_none()
+            && self.play.is_none()
+            && self.rest.is_none()
+            && self.sleep.is_none()
+            && self.seek_attention.is_none()
+            && self.explore.is_none()
+    }
+}
+
 /// Memory tuning: how much the character remembers and how fast it forgets.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -299,20 +339,11 @@ impl CharacterManifest {
     /// [`BehaviorIntent`](crate::behavior::planner::BehaviorIntent) label (e.g.
     /// `"notice-user"`, also accepting the snake_case form). Returns
     /// `default_action` when the character does not override that intent.
+    ///
+    /// Delegates to [`BehaviorMapping::resolve`]; kept as a convenience on the
+    /// manifest for callers that already hold a `&CharacterManifest`.
     pub fn resolve_action<'a>(&'a self, intent: &str, default_action: &'a str) -> &'a str {
-        let mapping = &self.behavior_mapping;
-        let override_action = match intent {
-            "notice-user" | "notice_user" => mapping.notice_user.as_deref(),
-            "approach-user" | "approach_user" => mapping.approach_user.as_deref(),
-            "avoid" => mapping.avoid.as_deref(),
-            "play" => mapping.play.as_deref(),
-            "rest" => mapping.rest.as_deref(),
-            "sleep" => mapping.sleep.as_deref(),
-            "seek-attention" | "seek_attention" => mapping.seek_attention.as_deref(),
-            "explore" => mapping.explore.as_deref(),
-            _ => None,
-        };
-        override_action.unwrap_or(default_action)
+        self.behavior_mapping.resolve(intent, default_action)
     }
 }
 

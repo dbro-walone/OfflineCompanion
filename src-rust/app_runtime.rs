@@ -91,12 +91,22 @@ impl AppRuntime {
         let mut behavior = BehaviorController::default();
         apply_behavior_settings(&mut behavior, settings);
         let catalog = PackageCatalog::scan(characters, actions);
-        // Seed the emotion engine from the loaded character's manifest profile.
-        // A v1 character has no personality layer and yields the balanced default.
-        let personality = catalog
-            .resolve_character(&settings.current_character_id)
-            .map(|package| package.manifest.personality())
-            .unwrap_or(Personality::BALANCED);
+        // Seed the emotion engine and behavior overrides from the loaded
+        // character's manifest profile. A v1 character has neither layer and
+        // yields the balanced default plus the engine's default action mapping.
+        // The borrow from `resolve_character` is confined to this match so the
+        // catalog can move into the runtime below.
+        let (personality, overrides) =
+            match catalog.resolve_character(&settings.current_character_id) {
+                Some(package) => (
+                    package.manifest.personality(),
+                    Some(package.manifest.behavior_mapping.clone()),
+                ),
+                None => (Personality::BALANCED, None),
+            };
+        if let Some(overrides) = overrides {
+            behavior.behavior_overrides = overrides;
+        }
         Self {
             catalog,
             character_id: settings.current_character_id.clone(),
@@ -267,14 +277,17 @@ impl AppRuntime {
         self.personality = personality;
     }
 
-    /// Seed the emotion engine from the current character's manifest profile.
+    /// Seed the emotion engine and the behavior overrides from the current
+    /// character's manifest.
     ///
     /// Called whenever the active character changes (on load, switch, reload).
-    /// A v1 character has no personality layer and yields the balanced default,
-    /// so the original neutral behavior is preserved.
+    /// A v1 character has no personality layer and no behavior mapping, so it
+    /// yields the balanced default and the engine's default intent-to-action
+    /// mapping — preserving the original neutral behavior.
     fn apply_character_personality(&mut self) {
         if let Some(package) = self.catalog.resolve_character(&self.character_id) {
             self.personality = package.manifest.personality();
+            self.behavior.behavior_overrides = package.manifest.behavior_mapping.clone();
         }
     }
 

@@ -9,6 +9,7 @@ use super::{
     state_model::PetStats,
     tree::BehaviorTree,
 };
+use crate::package_runtime::manifest::BehaviorMapping;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionTrace {
@@ -33,6 +34,11 @@ pub struct BehaviorController {
     /// the emotion-driven fields via [`BehaviorController::observe`]; the
     /// controller refreshes the live fields each turn before planning.
     pub brain: BehaviorContext,
+    /// Per-intent action overrides for the active character, consulted after the
+    /// (character-independent) tree resolves a default action id. Empty by
+    /// default, so the tree's mapping is used verbatim until a character pack
+    /// supplies its own. Populated by the runtime when a character loads.
+    pub behavior_overrides: BehaviorMapping,
     pub proactive_enabled: bool,
     pub allow_pet_approach: bool,
     pub allow_mouse_follow: bool,
@@ -53,6 +59,7 @@ impl Default for BehaviorController {
             planner: BehaviorPlanner,
             tree: BehaviorTree,
             brain: BehaviorContext::rested(),
+            behavior_overrides: BehaviorMapping::default(),
             proactive_enabled: true,
             allow_pet_approach: false,
             allow_mouse_follow: false,
@@ -90,8 +97,14 @@ impl BehaviorController {
 
         let (request, reason) = if let Some((intent, resolved)) = planned {
             self.apply_intent(intent, now_ms);
+            // Let the active character re-express the resolved intent: the tree
+            // supplies the character-independent default, the override (if any)
+            // swaps in this character's preferred action for that intent.
+            let action_id = self
+                .behavior_overrides
+                .resolve(intent.label(), resolved.action_id);
             (
-                Some(self.action(resolved.action_id, resolved.priority, now_ms)),
+                Some(self.action(action_id, resolved.priority, now_ms)),
                 resolved.reason,
             )
         } else {
