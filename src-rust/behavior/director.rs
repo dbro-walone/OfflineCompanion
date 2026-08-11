@@ -68,7 +68,6 @@ impl BehaviorController {
     pub fn handle(&mut self, event: PetEvent, now_ms: u64) -> Option<ScheduledAction> {
         self.memory.last_event = Some(format!("{event:?}"));
         self.mood.tick(now_ms);
-        let mut reason = "event observed";
         let mut fallback = None;
 
         // Refresh the controller-owned portion of the behavior context, then
@@ -89,14 +88,15 @@ impl BehaviorController {
                 .map(|resolved| (intent, resolved))
         });
 
-        let request = if let Some((intent, resolved)) = planned {
+        let (request, reason) = if let Some((intent, resolved)) = planned {
             self.apply_intent(intent, now_ms);
-            reason = resolved.reason;
-            Some(self.action(resolved.action_id, resolved.priority, now_ms))
+            (
+                Some(self.action(resolved.action_id, resolved.priority, now_ms)),
+                resolved.reason,
+            )
         } else {
             let (fallback_request, fallback_reason) = self.legacy_dispatch(&event, now_ms);
-            reason = fallback_reason;
-            fallback_request
+            (fallback_request, fallback_reason)
         };
 
         let had_request = request.is_some();
