@@ -46,7 +46,7 @@ pub fn load_manifest(path: &Path) -> Result<PackageManifest> {
         .unwrap_or("");
     let manifest = match ty {
         "character" => PackageManifest::Character(Box::new(serde_json::from_value(value)?)),
-        "action" => PackageManifest::Action(serde_json::from_value(value)?),
+        "action" => PackageManifest::Action(Box::new(serde_json::from_value(value)?)),
         _ => bail!("unknown packageType"),
     };
     Version::parse(manifest.version()).context("invalid package version")?;

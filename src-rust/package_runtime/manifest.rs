@@ -319,7 +319,7 @@ impl CharacterManifest {
 #[derive(Debug, Clone)]
 pub enum PackageManifest {
     Character(Box<CharacterManifest>),
-    Action(ActionPackManifest),
+    Action(Box<ActionPackManifest>),
 }
 
 impl PackageManifest {

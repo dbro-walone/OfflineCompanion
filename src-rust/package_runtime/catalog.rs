@@ -87,7 +87,7 @@ impl PackageCatalog {
                     {
                         self.warnings.push(format!("{}: {error}", path.display()));
                     } else {
-                        self.insert_action(dir, manifest);
+                        self.insert_action(dir, *manifest);
                     }
                 }
                 Ok(_) => self
